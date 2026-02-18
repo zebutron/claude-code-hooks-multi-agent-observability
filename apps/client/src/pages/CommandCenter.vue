@@ -41,7 +41,7 @@
         </button>
 
         <!-- Tag filter (if tags exist) -->
-        <div v-if="allTags.length" class="ml-2 pl-2 border-l border-stone-700/50 flex items-center gap-1.5 flex-wrap">
+        <div v-if="allTags.length" class="sm:ml-2 sm:pl-2 sm:border-l sm:border-stone-700/50 flex items-center gap-1.5 flex-wrap basis-full sm:basis-auto mt-1.5 sm:mt-0">
           <button
             v-for="tag in allTags"
             :key="tag"
@@ -70,50 +70,52 @@
     <!-- Create Task Form (collapsible) -->
     <div v-if="showCreateForm" class="px-4 py-3 bg-stone-900/50 border-b border-stone-800 space-y-2">
       <!-- Row 1: Title + Priority + Create -->
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2">
         <input
           ref="titleInput"
           v-model="newTaskTitle"
           type="text"
           placeholder="Task title..."
-          class="flex-1 px-3 py-2 text-sm rounded bg-stone-950 border border-stone-700 text-stone-100 placeholder-stone-500 focus:outline-none focus:border-stone-400"
+          class="flex-1 min-w-[200px] px-3 py-2 text-sm rounded bg-stone-950 border border-stone-700 text-stone-100 placeholder-stone-500 focus:outline-none focus:border-stone-400"
           @keydown.enter.exact="handleCreateTask"
           @keydown.escape="showCreateForm = false"
         />
-        <select v-model="newTaskPriority" class="px-2 py-2 text-xs rounded bg-stone-950 border border-stone-700 text-stone-200">
-          <option value="P0">P0</option>
-          <option value="P1">P1</option>
-          <option value="P2">P2</option>
-          <option value="P3">P3</option>
-        </select>
-        <select v-model="newTaskStatus" class="px-2 py-2 text-xs rounded bg-stone-950 border border-stone-700 text-stone-200">
-          <option value="queued">Queued</option>
-          <option value="active">Active</option>
-          <option value="discovered">Discovered</option>
-          <option value="blocked">Blocked</option>
-        </select>
-        <button
-          @click="handleCreateTask"
-          :disabled="!newTaskTitle.trim()"
-          class="px-4 py-2 text-xs font-semibold rounded bg-stone-200 hover:bg-white disabled:bg-stone-700 disabled:text-stone-500 text-stone-900 transition-colors"
-        >
-          Create
-        </button>
+        <div class="flex gap-2">
+          <select v-model="newTaskPriority" class="px-2 py-2 text-xs rounded bg-stone-950 border border-stone-700 text-stone-200">
+            <option value="P0">P0</option>
+            <option value="P1">P1</option>
+            <option value="P2">P2</option>
+            <option value="P3">P3</option>
+          </select>
+          <select v-model="newTaskStatus" class="px-2 py-2 text-xs rounded bg-stone-950 border border-stone-700 text-stone-200">
+            <option value="queued">Queued</option>
+            <option value="active">Active</option>
+            <option value="discovered">Discovered</option>
+            <option value="blocked">Blocked</option>
+          </select>
+          <button
+            @click="handleCreateTask"
+            :disabled="!newTaskTitle.trim()"
+            class="px-4 py-2 text-xs font-semibold rounded bg-stone-200 hover:bg-white disabled:bg-stone-700 disabled:text-stone-500 text-stone-900 transition-colors"
+          >
+            Create
+          </button>
+        </div>
       </div>
       <!-- Row 2: Description + Tags -->
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2">
         <input
           v-model="newTaskDescription"
           type="text"
           placeholder="Description (optional)..."
-          class="flex-1 px-3 py-1.5 text-xs rounded bg-stone-950 border border-stone-700/50 text-stone-200 placeholder-stone-600 focus:outline-none focus:border-stone-500"
+          class="flex-1 min-w-[200px] px-3 py-1.5 text-xs rounded bg-stone-950 border border-stone-700/50 text-stone-200 placeholder-stone-600 focus:outline-none focus:border-stone-500"
           @keydown.escape="showCreateForm = false"
         />
         <input
           v-model="newTaskTagsRaw"
           type="text"
           placeholder="Tags (comma separated)..."
-          class="w-48 px-3 py-1.5 text-xs rounded bg-stone-950 border border-stone-700/50 text-stone-200 placeholder-stone-600 focus:outline-none focus:border-stone-500"
+          class="w-48 sm:w-48 max-sm:flex-1 max-sm:min-w-[150px] px-3 py-1.5 text-xs rounded bg-stone-950 border border-stone-700/50 text-stone-200 placeholder-stone-600 focus:outline-none focus:border-stone-500"
           @keydown.escape="showCreateForm = false"
         />
       </div>

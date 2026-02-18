@@ -97,7 +97,7 @@
     </div>
 
     <!-- Scores — clickable to cycle 1-10 -->
-    <div class="flex gap-5 text-xs">
+    <div class="flex flex-wrap gap-3 sm:gap-5 text-xs">
       <button
         @click="cycleScore('roi_score')"
         class="flex items-center gap-1.5 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
@@ -200,7 +200,7 @@
     </div>
 
     <!-- Author + timestamps -->
-    <div class="flex gap-4 text-[10px] text-stone-500">
+    <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-stone-500">
       <span>Author: {{ task.source }}</span>
       <span>Created: {{ formatDate(task.created_at) }}</span>
       <span v-if="task.blocked_since">Blocked: {{ timeAgo(task.blocked_since) }}</span>
