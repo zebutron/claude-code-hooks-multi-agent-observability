@@ -121,6 +121,9 @@
 
     <!-- Priority Stack -->
     <div class="flex-1 overflow-y-auto px-4 py-3 space-y-1">
+      <!-- Digest Panel -->
+      <DigestPanel />
+
       <!-- Loading -->
       <div v-if="loading" class="flex items-center justify-center py-12">
         <div class="text-stone-500 text-sm">Loading tasks...</div>
@@ -174,6 +177,7 @@ import { useTaskTree } from '../composables/useTaskTree';
 import { useUsage } from '../composables/useUsage';
 import TaskRow from '../components/TaskRow.vue';
 import UsageMeter from '../components/UsageMeter.vue';
+import DigestPanel from '../components/DigestPanel.vue';
 
 const {
   tasks,

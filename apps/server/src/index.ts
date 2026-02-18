@@ -25,6 +25,7 @@ import {
   type TaskCreate,
   type TaskUpdate,
 } from './tasks';
+import { generateDigest, digestToMarkdown } from './digest';
 
 // Initialize database
 initDatabase();
@@ -606,6 +607,25 @@ const server = Bun.serve({
     if (url.pathname === '/usage/summary' && req.method === 'GET') {
       const summary = getUsageSummary();
       return new Response(JSON.stringify(summary), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // ── Daily Digest API ──────────────────────────────────────────────
+
+    // GET /digest - Generate daily digest (JSON)
+    if (url.pathname === '/digest' && req.method === 'GET') {
+      const format = url.searchParams.get('format') || 'json';
+      const digest = generateDigest();
+
+      if (format === 'markdown' || format === 'md') {
+        const md = digestToMarkdown(digest);
+        return new Response(md, {
+          headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }
+        });
+      }
+
+      return new Response(JSON.stringify(digest), {
         headers: { ...headers, 'Content-Type': 'application/json' }
       });
     }
