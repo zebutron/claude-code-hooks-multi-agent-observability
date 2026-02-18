@@ -25,7 +25,7 @@ import {
   type TaskCreate,
   type TaskUpdate,
 } from './tasks';
-import { generateDigest, digestToMarkdown } from './digest';
+import { generateDigest, digestToMarkdown, digestToSlack } from './digest';
 
 // Initialize database
 initDatabase();
@@ -621,6 +621,13 @@ const server = Bun.serve({
       if (format === 'markdown' || format === 'md') {
         const md = digestToMarkdown(digest);
         return new Response(md, {
+          headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }
+        });
+      }
+
+      if (format === 'slack') {
+        const slack = digestToSlack(digest);
+        return new Response(slack, {
           headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' }
         });
       }

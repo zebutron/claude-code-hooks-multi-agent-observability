@@ -225,3 +225,36 @@ export function digestToMarkdown(digest: DailyDigest): string {
 
   return lines.join('\n').trim();
 }
+
+// ── Slack mrkdwn formatter ────────────────────────────────────────────
+
+export function digestToSlack(digest: DailyDigest): string {
+  const lines: string[] = [];
+
+  lines.push(`*${digest.greeting}* Here's your stack:`);
+  lines.push('');
+
+  // Summary line
+  const s = digest.summary;
+  const parts: string[] = [];
+  if (s.blocked > 0) parts.push(`🚨 ${s.blocked} blocked`);
+  if (s.active > 0) parts.push(`⚡ ${s.active} active`);
+  if (s.completed_today > 0) parts.push(`✅ ${s.completed_today} done today`);
+  if (s.discovered > 0) parts.push(`🔮 ${s.discovered} to triage`);
+  parts.push(`📋 ${s.queued} queued`);
+  lines.push(parts.join(' · '));
+  lines.push('');
+
+  // Sections
+  for (const section of digest.sections) {
+    lines.push(`*${section.emoji} ${section.title}*`);
+    for (const item of section.items) {
+      lines.push(`  • ${item}`);
+    }
+    lines.push('');
+  }
+
+  lines.push(`_View full stack: http://localhost:5173/command_`);
+
+  return lines.join('\n').trim();
+}
