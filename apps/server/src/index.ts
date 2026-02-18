@@ -1,15 +1,30 @@
 import { initDatabase, insertEvent, getFilterOptions, getRecentEvents, updateEventHITLResponse } from './db';
 import type { HookEvent, HumanInTheLoopResponse } from './types';
-import { 
-  createTheme, 
-  updateThemeById, 
-  getThemeById, 
-  searchThemes, 
-  deleteThemeById, 
-  exportThemeById, 
+import {
+  createTheme,
+  updateThemeById,
+  getThemeById,
+  searchThemes,
+  deleteThemeById,
+  exportThemeById,
   importTheme,
-  getThemeStats 
+  getThemeStats
 } from './theme';
+import {
+  createTask,
+  getTask,
+  getTaskWithChildren,
+  getRootTasks,
+  getBlockedTasks,
+  updateTask,
+  reorderTask,
+  unblockTask,
+  archiveTask,
+  getUsageSummary,
+  handleHookEvent,
+  type TaskCreate,
+  type TaskUpdate,
+} from './tasks';
 
 // Initialize database
 initDatabase();
@@ -135,7 +150,15 @@ const server = Bun.serve({
         
         // Insert event into database
         const savedEvent = insertEvent(event);
-        
+
+        // Auto-update tasks and usage from hook events
+        try {
+          const payloadStr = JSON.stringify(event.payload);
+          handleHookEvent(event.session_id, event.hook_event_type, payloadStr.length);
+        } catch {
+          // Don't fail event ingestion if task update fails
+        }
+
         // Broadcast to all WebSocket clients
         const message = JSON.stringify({ type: 'event', data: savedEvent });
         wsClients.forEach(client => {
@@ -405,6 +428,188 @@ const server = Bun.serve({
       });
     }
     
+    // ── Command Center: Task API ─────────────────────────────────────────
+
+    // GET /tasks - List root tasks (add ?children=true for full tree)
+    if (url.pathname === '/tasks' && req.method === 'GET') {
+      const includeChildren = url.searchParams.get('children') === 'true';
+      const tasks = getRootTasks(includeChildren);
+      return new Response(JSON.stringify(tasks), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // GET /tasks/blocked - Blocked tasks sorted by priority + ROI
+    if (url.pathname === '/tasks/blocked' && req.method === 'GET') {
+      const tasks = getBlockedTasks();
+      return new Response(JSON.stringify(tasks), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // GET /tasks/:id - Single task with children
+    if (url.pathname.match(/^\/tasks\/[^\/]+$/) && req.method === 'GET') {
+      const id = url.pathname.split('/')[2];
+      const task = getTaskWithChildren(id);
+      if (!task) {
+        return new Response(JSON.stringify({ error: 'Task not found' }), {
+          status: 404,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify(task), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // POST /tasks - Create task
+    if (url.pathname === '/tasks' && req.method === 'POST') {
+      try {
+        const input: TaskCreate = await req.json();
+        if (!input.title) {
+          return new Response(JSON.stringify({ error: 'title is required' }), {
+            status: 400,
+            headers: { ...headers, 'Content-Type': 'application/json' }
+          });
+        }
+        const task = createTask(input);
+
+        // Broadcast to WebSocket clients
+        const message = JSON.stringify({ type: 'task_update', data: task });
+        wsClients.forEach(client => {
+          try { client.send(message); } catch { wsClients.delete(client); }
+        });
+
+        return new Response(JSON.stringify(task), {
+          status: 201,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: 'Invalid request' }), {
+          status: 400,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // PUT /tasks/:id - Update task
+    if (url.pathname.match(/^\/tasks\/[^\/]+$/) && req.method === 'PUT') {
+      const id = url.pathname.split('/')[2];
+      try {
+        const updates: TaskUpdate = await req.json();
+        const task = updateTask(id, updates);
+        if (!task) {
+          return new Response(JSON.stringify({ error: 'Task not found' }), {
+            status: 404,
+            headers: { ...headers, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const message = JSON.stringify({ type: 'task_update', data: task });
+        wsClients.forEach(client => {
+          try { client.send(message); } catch { wsClients.delete(client); }
+        });
+
+        return new Response(JSON.stringify(task), {
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: 'Invalid request' }), {
+          status: 400,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // PATCH /tasks/:id/reorder - Reorder task
+    if (url.pathname.match(/^\/tasks\/[^\/]+\/reorder$/) && req.method === 'PATCH') {
+      const id = url.pathname.split('/')[2];
+      try {
+        const { sort_order } = await req.json() as { sort_order: number };
+        const task = reorderTask(id, sort_order);
+        if (!task) {
+          return new Response(JSON.stringify({ error: 'Task not found' }), {
+            status: 404,
+            headers: { ...headers, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const message = JSON.stringify({ type: 'task_update', data: task });
+        wsClients.forEach(client => {
+          try { client.send(message); } catch { wsClients.delete(client); }
+        });
+
+        return new Response(JSON.stringify(task), {
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: 'Invalid request' }), {
+          status: 400,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // POST /tasks/:id/unblock - Unblock task with response
+    if (url.pathname.match(/^\/tasks\/[^\/]+\/unblock$/) && req.method === 'POST') {
+      const id = url.pathname.split('/')[2];
+      try {
+        const { response } = await req.json() as { response: string };
+        const task = unblockTask(id, response || 'Unblocked');
+        if (!task) {
+          return new Response(JSON.stringify({ error: 'Task not found' }), {
+            status: 404,
+            headers: { ...headers, 'Content-Type': 'application/json' }
+          });
+        }
+
+        const message = JSON.stringify({ type: 'task_update', data: task });
+        wsClients.forEach(client => {
+          try { client.send(message); } catch { wsClients.delete(client); }
+        });
+
+        return new Response(JSON.stringify(task), {
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: 'Invalid request' }), {
+          status: 400,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // DELETE /tasks/:id - Archive task
+    if (url.pathname.match(/^\/tasks\/[^\/]+$/) && req.method === 'DELETE') {
+      const id = url.pathname.split('/')[2];
+      const success = archiveTask(id);
+      if (!success) {
+        return new Response(JSON.stringify({ error: 'Task not found' }), {
+          status: 404,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+
+      const message = JSON.stringify({ type: 'task_archived', data: { id } });
+      wsClients.forEach(client => {
+        try { client.send(message); } catch { wsClients.delete(client); }
+      });
+
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // ── Command Center: Usage API ──────────────────────────────────────
+
+    // GET /usage/summary
+    if (url.pathname === '/usage/summary' && req.method === 'GET') {
+      const summary = getUsageSummary();
+      return new Response(JSON.stringify(summary), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
     // WebSocket upgrade
     if (url.pathname === '/stream') {
       const success = server.upgrade(req);

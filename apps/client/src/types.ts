@@ -62,6 +62,49 @@ export interface ChartDataPoint {
   sessions: Record<string, number>; // session id -> count
 }
 
+// ── Command Center Types ───────────────────────────────────────────────
+
+export type TaskStatus = 'queued' | 'active' | 'blocked' | 'complete' | 'discovered' | 'archived';
+export type TaskPriority = 'P0' | 'P1' | 'P2' | 'P3';
+export type BlockedBy = 'human_input' | 'dependency' | 'resource';
+
+export interface Task {
+  id: string;
+  parent_id: string | null;
+  title: string;
+  description: string | null;
+  rationale: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  sort_order: number;
+  roi_score: number;
+  risk_score: number;
+  fit_score: number;
+  estimated_tokens: number | null;
+  actual_tokens: number;
+  estimated_minutes: number | null;
+  actual_minutes: number;
+  blocked_by: BlockedBy | null;
+  blocked_reason: string | null;
+  blocked_since: number | null;
+  agent_session_id: string | null;
+  last_agent_activity: number | null;
+  source: 'human' | 'agent';
+  notes: string | null;
+  tags: string[];
+  depth: number;
+  created_at: number;
+  updated_at: number;
+  completed_at: number | null;
+  children?: Task[];
+}
+
+export interface UsageSummary {
+  today: number;
+  this_week: number;
+  by_session: { session_id: string; tokens: number; model_name: string | null }[];
+}
+
 export interface ChartConfig {
   maxDataPoints: number;
   animationDuration: number;

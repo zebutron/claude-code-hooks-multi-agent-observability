@@ -120,6 +120,67 @@ export function initDatabase(): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_themes_createdAt ON themes(createdAt)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_theme_shares_token ON theme_shares(shareToken)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_theme_ratings_theme ON theme_ratings(themeId)');
+
+  // ── Command Center: Tasks table ──────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      parent_id TEXT,
+      title TEXT NOT NULL,
+      description TEXT,
+      rationale TEXT,
+      status TEXT NOT NULL DEFAULT 'queued',
+      priority TEXT NOT NULL DEFAULT 'P2',
+      sort_order REAL NOT NULL DEFAULT 0,
+      roi_score INTEGER DEFAULT 5,
+      risk_score INTEGER DEFAULT 5,
+      fit_score INTEGER DEFAULT 5,
+      estimated_tokens INTEGER,
+      actual_tokens INTEGER DEFAULT 0,
+      estimated_minutes INTEGER,
+      actual_minutes INTEGER DEFAULT 0,
+      blocked_by TEXT,
+      blocked_reason TEXT,
+      blocked_since INTEGER,
+      agent_session_id TEXT,
+      last_agent_activity INTEGER,
+      source TEXT DEFAULT 'human',
+      notes TEXT,
+      depth INTEGER DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      completed_at INTEGER,
+      FOREIGN KEY (parent_id) REFERENCES tasks(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_sort ON tasks(sort_order)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_blocked ON tasks(blocked_by)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_agent ON tasks(agent_session_id)');
+
+  // Migration: add tags column if missing
+  try {
+    const taskCols = db.prepare("PRAGMA table_info(tasks)").all() as any[];
+    if (!taskCols.some((c: any) => c.name === 'tags')) {
+      db.exec("ALTER TABLE tasks ADD COLUMN tags TEXT DEFAULT '[]'");
+    }
+  } catch { /* table may not exist yet */ }
+
+  // ── Command Center: Usage log table ──────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS usage_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      tokens_estimated INTEGER NOT NULL,
+      timestamp INTEGER NOT NULL,
+      model_name TEXT
+    )
+  `);
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage_log(timestamp)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_log(session_id)');
 }
 
 export function insertEvent(event: HookEvent): HookEvent {
