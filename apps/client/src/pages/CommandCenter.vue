@@ -150,9 +150,11 @@
       <!-- Task list -->
       <TaskRow
         v-else
-        v-for="task in filteredTasks"
+        v-for="(task, idx) in filteredTasks"
         :key="task.id"
         :task="task"
+        :focused="idx === focusedIndex"
+        :ref="(el: any) => { if (el) taskRowRefs[idx] = el.$el || el; }"
         @unblock="handleUnblock"
         @update="handleUpdate"
         @archive="handleArchive"
@@ -171,7 +173,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, watch, nextTick } from 'vue';
+import { ref, computed, reactive, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import type { Task, TaskPriority, TaskStatus } from '../types';
 import { useTaskTree } from '../composables/useTaskTree';
 import { useUsage } from '../composables/useUsage';
@@ -363,6 +365,77 @@ async function handleReorder(id: string, sortOrder: number) {
     console.error('Failed to reorder task:', e);
   }
 }
+
+// ── Keyboard navigation ─────────────────────────────────────────────
+
+const focusedIndex = ref(-1);
+const taskRowRefs: Record<number, HTMLElement> = {};
+
+function handleKeyNav(e: KeyboardEvent) {
+  // Don't capture when typing in inputs
+  const tag = (e.target as HTMLElement)?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+  const len = filteredTasks.value.length;
+  if (len === 0) return;
+
+  switch (e.key) {
+    case 'j':
+    case 'ArrowDown':
+      e.preventDefault();
+      focusedIndex.value = Math.min(focusedIndex.value + 1, len - 1);
+      scrollFocusedIntoView();
+      break;
+    case 'k':
+    case 'ArrowUp':
+      e.preventDefault();
+      focusedIndex.value = Math.max(focusedIndex.value - 1, 0);
+      scrollFocusedIntoView();
+      break;
+    case 'Enter':
+    case ' ':
+      if (focusedIndex.value >= 0) {
+        e.preventDefault();
+        // Click the row to toggle expand
+        const el = taskRowRefs[focusedIndex.value];
+        if (el) {
+          const clickTarget = el.querySelector('.flex.items-center.gap-2\\.5') as HTMLElement;
+          if (clickTarget) clickTarget.click();
+        }
+      }
+      break;
+    case 'Escape':
+      focusedIndex.value = -1;
+      break;
+    case 'g':
+      // gg → go to top (vim style)
+      focusedIndex.value = 0;
+      scrollFocusedIntoView();
+      break;
+    case 'G':
+      // G → go to bottom
+      focusedIndex.value = len - 1;
+      scrollFocusedIntoView();
+      break;
+  }
+}
+
+function scrollFocusedIntoView() {
+  nextTick(() => {
+    const el = taskRowRefs[focusedIndex.value];
+    if (el) {
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  });
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', handleKeyNav);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeyNav);
+});
 </script>
 
 <style scoped>

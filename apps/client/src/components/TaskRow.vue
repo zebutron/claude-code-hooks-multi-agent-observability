@@ -5,6 +5,7 @@
       statusBorderClass,
       { 'task-row--blocked-pulse': task.status === 'blocked' },
       { 'ml-5': task.depth > 0 },
+      { 'task-row--focused': focused },
     ]"
     draggable="true"
     @dragstart="onDragStart"
@@ -118,9 +119,12 @@ import { ref, computed } from 'vue';
 import type { Task } from '../types';
 import TaskDetail from './TaskDetail.vue';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   task: Task;
-}>();
+  focused?: boolean;
+}>(), {
+  focused: false,
+});
 
 const emit = defineEmits<{
   unblock: [id: string, response: string];
@@ -230,6 +234,9 @@ function onRowClick() {
 }
 .task-row:active {
   cursor: grabbing;
+}
+.task-row--focused {
+  @apply ring-1 ring-stone-500/60 bg-stone-800/80;
 }
 .task-row--blocked-pulse {
   animation: blocked-pulse 2s ease-in-out infinite;
