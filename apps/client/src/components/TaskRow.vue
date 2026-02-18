@@ -21,6 +21,16 @@
       <!-- Status dot -->
       <span class="shrink-0 w-2.5 h-2.5 rounded-full" :class="statusDotClass" />
 
+      <!-- Priority badge (only P0/P1 — P2/P3 are default, no need to show) -->
+      <span
+        v-if="task.priority === 'P0'"
+        class="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-500/20 text-red-400"
+      >P0</span>
+      <span
+        v-else-if="task.priority === 'P1'"
+        class="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400/80"
+      >P1</span>
+
       <!-- Title -->
       <span class="font-medium text-sm text-stone-100 truncate">
         {{ task.title }}

@@ -52,29 +52,111 @@
       </div>
     </div>
 
-    <!-- Rationale (no label, just the text) -->
-    <div v-if="task.rationale" class="text-sm text-stone-300 italic">
-      {{ task.rationale }}
+    <!-- Rationale — click to edit -->
+    <div v-if="editingRationale" class="flex gap-2">
+      <input
+        ref="rationaleInput"
+        v-model="editRationaleValue"
+        type="text"
+        class="flex-1 px-2 py-1 text-sm rounded bg-stone-900 border border-stone-600 text-stone-200 italic focus:outline-none focus:border-stone-400"
+        placeholder="Why this priority/approach..."
+        @keydown.enter="saveRationale"
+        @keydown.escape="editingRationale = false"
+        @blur="saveRationale"
+      />
+    </div>
+    <div
+      v-else
+      @click="startEditRationale"
+      class="text-sm italic cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors"
+      :class="task.rationale ? 'text-stone-300' : 'text-stone-600'"
+    >
+      {{ task.rationale || 'Add rationale...' }}
     </div>
 
-    <!-- Description -->
-    <div v-if="task.description" class="text-sm text-stone-300">
-      {{ task.description }}
+    <!-- Description — click to edit -->
+    <div v-if="editingDescription" class="flex gap-2">
+      <input
+        ref="descriptionInput"
+        v-model="editDescriptionValue"
+        type="text"
+        class="flex-1 px-2 py-1 text-sm rounded bg-stone-900 border border-stone-600 text-stone-200 focus:outline-none focus:border-stone-400"
+        placeholder="Description..."
+        @keydown.enter="saveDescription"
+        @keydown.escape="editingDescription = false"
+        @blur="saveDescription"
+      />
+    </div>
+    <div
+      v-else
+      @click="startEditDescription"
+      class="text-sm cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors"
+      :class="task.description ? 'text-stone-300' : 'text-stone-600'"
+    >
+      {{ task.description || 'Add description...' }}
     </div>
 
-    <!-- Scores — plain high-contrast text -->
+    <!-- Scores — clickable to cycle 1-10 -->
     <div class="flex gap-5 text-xs">
-      <div class="flex items-center gap-1.5">
+      <button
+        @click="cycleScore('roi_score')"
+        class="flex items-center gap-1.5 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
+        title="Click to change ROI score (1-10)"
+      >
         <span class="text-stone-500">ROI</span>
         <span class="font-bold text-stone-200">{{ task.roi_score }}</span>
-      </div>
-      <div class="flex items-center gap-1.5">
+      </button>
+      <button
+        @click="cycleScore('risk_score')"
+        class="flex items-center gap-1.5 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
+        title="Click to change Risk score (1-10)"
+      >
         <span class="text-stone-500">Risk</span>
         <span class="font-bold text-stone-200">{{ task.risk_score }}</span>
-      </div>
-      <div class="flex items-center gap-1.5">
+      </button>
+      <button
+        @click="cycleScore('fit_score')"
+        class="flex items-center gap-1.5 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
+        title="Click to change AI Fit score (1-10)"
+      >
         <span class="text-stone-500">AI Fit</span>
         <span class="font-bold text-stone-200">{{ task.fit_score }}</span>
+      </button>
+
+      <!-- Quick status actions -->
+      <div class="flex-1" />
+      <div class="flex gap-1.5">
+        <button
+          v-if="task.status !== 'active' && task.status !== 'blocked' && task.status !== 'complete'"
+          @click="$emit('update', { status: 'active' })"
+          class="detail-action-btn"
+          title="Start working on this"
+        >
+          ▶ Start
+        </button>
+        <button
+          v-if="task.status === 'active'"
+          @click="$emit('update', { status: 'complete' })"
+          class="detail-action-btn"
+          title="Mark as complete"
+        >
+          ✓ Done
+        </button>
+        <button
+          v-if="task.status !== 'blocked' && task.status !== 'complete'"
+          @click="setBlocked"
+          class="detail-action-btn"
+          title="Mark as blocked"
+        >
+          ⏸ Block
+        </button>
+        <button
+          @click="$emit('archive')"
+          class="detail-action-btn text-stone-600 hover:text-red-400"
+          title="Archive this task"
+        >
+          ✕
+        </button>
       </div>
     </div>
 
@@ -99,6 +181,24 @@
       </div>
     </div>
 
+    <!-- Add note -->
+    <div class="flex gap-2">
+      <input
+        v-model="newNote"
+        type="text"
+        placeholder="Add a note..."
+        class="flex-1 px-2 py-1 text-xs rounded bg-stone-900 border border-stone-700/50 text-stone-300 placeholder-stone-600 focus:outline-none focus:border-stone-500"
+        @keydown.enter="addNote"
+      />
+      <button
+        v-if="newNote.trim()"
+        @click="addNote"
+        class="px-2 py-1 text-[10px] font-medium rounded bg-stone-700 hover:bg-stone-600 text-stone-200 transition-colors"
+      >
+        Add
+      </button>
+    </div>
+
     <!-- Author + timestamps -->
     <div class="flex gap-4 text-[10px] text-stone-500">
       <span>Author: {{ task.source }}</span>
@@ -110,7 +210,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { ref, computed, nextTick } from 'vue';
 import type { Task } from '../types';
 import InlineUnblock from './InlineUnblock.vue';
 
@@ -118,13 +218,93 @@ const props = defineProps<{
   task: Task;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   unblock: [response: string];
   update: [updates: Partial<Task>];
   archive: [];
 }>();
 
-// Parse notes into structured activity entries
+// ── Inline editing: Rationale ────────────────────────────────────────
+
+const editingRationale = ref(false);
+const editRationaleValue = ref('');
+const rationaleInput = ref<HTMLInputElement | null>(null);
+
+async function startEditRationale() {
+  editRationaleValue.value = props.task.rationale || '';
+  editingRationale.value = true;
+  await nextTick();
+  rationaleInput.value?.focus();
+}
+
+function saveRationale() {
+  editingRationale.value = false;
+  const val = editRationaleValue.value.trim();
+  if (val !== (props.task.rationale || '')) {
+    emit('update', { rationale: val || undefined } as any);
+  }
+}
+
+// ── Inline editing: Description ──────────────────────────────────────
+
+const editingDescription = ref(false);
+const editDescriptionValue = ref('');
+const descriptionInput = ref<HTMLInputElement | null>(null);
+
+async function startEditDescription() {
+  editDescriptionValue.value = props.task.description || '';
+  editingDescription.value = true;
+  await nextTick();
+  descriptionInput.value?.focus();
+}
+
+function saveDescription() {
+  editingDescription.value = false;
+  const val = editDescriptionValue.value.trim();
+  if (val !== (props.task.description || '')) {
+    emit('update', { description: val || undefined } as any);
+  }
+}
+
+// ── Score cycling ────────────────────────────────────────────────────
+
+function cycleScore(field: 'roi_score' | 'risk_score' | 'fit_score') {
+  const current = props.task[field];
+  const next = current >= 10 ? 1 : current + 1;
+  emit('update', { [field]: next } as any);
+}
+
+// ── Quick block ──────────────────────────────────────────────────────
+
+function setBlocked() {
+  const reason = prompt('What is blocking this task?');
+  if (reason) {
+    emit('update', {
+      status: 'blocked',
+      blocked_by: 'human_input',
+      blocked_reason: reason,
+    });
+  }
+}
+
+// ── Add note ─────────────────────────────────────────────────────────
+
+const newNote = ref('');
+
+function addNote() {
+  const text = newNote.value.trim();
+  if (!text) return;
+  const timestamp = new Date().toISOString();
+  const noteEntry = `[${timestamp}] ${text}`;
+  const updatedNotes = props.task.notes
+    ? props.task.notes + '\n' + noteEntry
+    : noteEntry;
+  emit('update', { notes: updatedNotes });
+  newNote.value = '';
+}
+
+// ── Notes parsing ────────────────────────────────────────────────────
+
 const parsedNotes = computed(() => {
   if (!props.task.notes) return [];
   return props.task.notes.split('\n').filter(line => line.trim()).map(line => {
@@ -135,6 +315,8 @@ const parsedNotes = computed(() => {
     return { time: '', text: line };
   });
 });
+
+// ── Formatters ───────────────────────────────────────────────────────
 
 function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -151,3 +333,12 @@ function timeAgo(ts: number): string {
   return `${days}d ago`;
 }
 </script>
+
+<style scoped>
+.detail-action-btn {
+  @apply px-2 py-0.5 text-[10px] font-medium rounded
+    bg-stone-800 text-stone-400 border border-stone-700/50
+    hover:bg-stone-700 hover:text-stone-200
+    transition-colors;
+}
+</style>
