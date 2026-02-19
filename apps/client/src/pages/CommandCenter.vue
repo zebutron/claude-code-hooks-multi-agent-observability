@@ -260,10 +260,10 @@ const filterOptions = computed(() => {
 
 const statusTier: Record<string, number> = {
   blocked: 0,
-  complete: 1,
-  discovered: 2,
-  active: 3,
-  queued: 4,
+  active: 1,
+  queued: 2,
+  discovered: 3,
+  complete: 4,
 };
 
 const sortedTasks = computed(() => {
