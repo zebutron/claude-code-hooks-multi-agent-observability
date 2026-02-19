@@ -5,13 +5,17 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      name: 'timeline',
-      component: () => import('./pages/Timeline.vue'),
+      redirect: '/command',
     },
     {
       path: '/command',
       name: 'command',
       component: () => import('./pages/CommandCenter.vue'),
+    },
+    {
+      path: '/timeline',
+      name: 'timeline',
+      component: () => import('./pages/Timeline.vue'),
     },
   ],
 });

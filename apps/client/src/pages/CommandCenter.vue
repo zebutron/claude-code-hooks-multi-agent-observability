@@ -1,27 +1,41 @@
 <template>
   <div class="h-screen flex flex-col bg-stone-950">
     <!-- Header -->
-    <header class="bg-stone-900 shadow-lg border-b border-stone-800">
-      <div class="px-4 py-3 flex items-center justify-between">
-        <!-- Title + back link -->
-        <div class="flex items-center gap-3">
-          <router-link to="/" class="text-stone-500 hover:text-stone-200 transition-colors text-sm">
-            ← Timeline
-          </router-link>
-          <h1 class="text-lg font-bold text-stone-100">Command Center</h1>
-        </div>
+    <header class="bg-stone-900 border-b border-stone-800">
+      <!-- Title + Tabs -->
+      <div class="px-4 pt-3 pb-0 flex items-center justify-between">
+        <h1 class="text-lg font-bold text-stone-100">Command Center</h1>
+      </div>
 
-        <!-- Add task button -->
+      <!-- Tab bar -->
+      <div class="px-4 pt-2 flex items-center gap-4">
         <button
-          @click="showCreateForm = !showCreateForm"
-          class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-stone-200 hover:bg-white text-stone-900 transition-colors"
+          @click="activeTab = 'prio'"
+          class="pb-2 text-sm font-medium border-b-2 transition-colors"
+          :class="activeTab === 'prio'
+            ? 'text-stone-100 border-stone-100'
+            : 'text-stone-500 border-transparent hover:text-stone-300'"
         >
-          + Add Task
+          Priority Stack
+        </button>
+        <button
+          @click="activeTab = 'digest'"
+          class="pb-2 text-sm font-medium border-b-2 transition-colors"
+          :class="activeTab === 'digest'
+            ? 'text-stone-100 border-stone-100'
+            : 'text-stone-500 border-transparent hover:text-stone-300'"
+        >
+          Daily Digest
         </button>
       </div>
 
-      <!-- Status filter chips + counts -->
-      <div class="px-4 pb-2 flex items-center gap-1.5 flex-wrap">
+      <!-- Usage Meter (below tabs, always visible) -->
+      <div class="px-4 py-2">
+        <UsageMeter :usage="usage" />
+      </div>
+
+      <!-- Status filter chips + Tag filters (only on prio tab) -->
+      <div v-if="activeTab === 'prio'" class="px-4 pb-2 flex items-center gap-1.5 flex-wrap">
         <button
           @click="activeFilter = null"
           class="filter-chip"
@@ -36,11 +50,11 @@
           class="filter-chip"
           :class="activeFilter === f.status ? 'filter-chip--active' : ''"
         >
-          <span class="inline-block w-1.5 h-1.5 rounded-full mr-1" :class="f.dotClass" />
+          <span class="inline-block w-2 h-2 rounded-full mr-1" :class="f.dotClass" />
           {{ f.label }} <span class="font-mono ml-1 opacity-70">{{ f.count }}</span>
         </button>
 
-        <!-- Tag filter (if tags exist) -->
+        <!-- Tag filter -->
         <div v-if="allTags.length" class="sm:ml-2 sm:pl-2 sm:border-l sm:border-stone-700/50 flex items-center gap-1.5 flex-wrap basis-full sm:basis-auto mt-1.5 sm:mt-0">
           <button
             v-for="tag in allTags"
@@ -60,71 +74,66 @@
           </button>
         </div>
       </div>
-
-      <!-- Usage Meter -->
-      <div class="px-4 pb-3">
-        <UsageMeter :usage="usage" />
-      </div>
     </header>
 
-    <!-- Create Task Form (collapsible) -->
-    <div v-if="showCreateForm" class="px-4 py-3 bg-stone-900/50 border-b border-stone-800 space-y-2">
-      <!-- Row 1: Title + Priority + Create -->
-      <div class="flex flex-wrap gap-2">
-        <input
-          ref="titleInput"
-          v-model="newTaskTitle"
-          type="text"
-          placeholder="Task title..."
-          class="flex-1 min-w-[200px] px-3 py-2 text-sm rounded bg-stone-950 border border-stone-700 text-stone-100 placeholder-stone-500 focus:outline-none focus:border-stone-400"
-          @keydown.enter.exact="handleCreateTask"
-          @keydown.escape="showCreateForm = false"
-        />
-        <div class="flex gap-2">
-          <select v-model="newTaskPriority" class="px-2 py-2 text-xs rounded bg-stone-950 border border-stone-700 text-stone-200">
+    <!-- ═══ PRIORITY STACK TAB ═══ -->
+    <div v-if="activeTab === 'prio'" class="flex-1 overflow-y-auto px-4 py-3 space-y-1">
+      <!-- Add Task button (minimal, centered, top of list) -->
+      <div class="flex justify-center mb-2">
+        <button
+          @click="toggleCreateForm"
+          class="w-full max-w-md h-8 flex items-center justify-center rounded-lg border border-dashed transition-all"
+          :class="showCreateForm
+            ? 'border-stone-600 bg-stone-900/80 text-stone-400'
+            : 'border-stone-700/50 hover:border-stone-600 text-stone-600 hover:text-stone-400 hover:bg-stone-900/40'"
+        >
+          <span class="text-lg leading-none">+</span>
+        </button>
+      </div>
+
+      <!-- Inline create form (expands in place) -->
+      <div v-if="showCreateForm" class="mb-3 bg-stone-900/60 rounded-lg border border-stone-800/60 overflow-hidden">
+        <div class="px-3 py-2">
+          <input
+            ref="titleInput"
+            v-model="newTaskTitle"
+            type="text"
+            placeholder="What needs to happen?"
+            class="w-full bg-transparent text-sm text-stone-100 placeholder-stone-600 focus:outline-none"
+            @keydown.enter.exact="handleCreateTask"
+            @keydown.escape="showCreateForm = false"
+          />
+        </div>
+        <!-- Extra fields (collapsed until title has content) -->
+        <div v-if="newTaskTitle.trim()" class="px-3 pb-2 flex flex-wrap gap-2 items-center border-t border-stone-800/30 pt-2">
+          <select v-model="newTaskPriority" class="px-2 py-1 text-[10px] rounded bg-stone-950 border border-stone-700/50 text-stone-300">
             <option value="P0">P0</option>
             <option value="P1">P1</option>
             <option value="P2">P2</option>
             <option value="P3">P3</option>
           </select>
-          <select v-model="newTaskStatus" class="px-2 py-2 text-xs rounded bg-stone-950 border border-stone-700 text-stone-200">
+          <select v-model="newTaskStatus" class="px-2 py-1 text-[10px] rounded bg-stone-950 border border-stone-700/50 text-stone-300">
             <option value="queued">Queued</option>
             <option value="active">Active</option>
-            <option value="discovered">Discovered</option>
+            <option value="discovered">Unrated</option>
             <option value="blocked">Blocked</option>
           </select>
+          <input
+            v-model="newTaskTagsRaw"
+            type="text"
+            placeholder="Tags..."
+            class="flex-1 min-w-[100px] px-2 py-1 text-[10px] rounded bg-stone-950 border border-stone-700/50 text-stone-300 placeholder-stone-600 focus:outline-none"
+            @keydown.escape="showCreateForm = false"
+          />
           <button
             @click="handleCreateTask"
             :disabled="!newTaskTitle.trim()"
-            class="px-4 py-2 text-xs font-semibold rounded bg-stone-200 hover:bg-white disabled:bg-stone-700 disabled:text-stone-500 text-stone-900 transition-colors"
+            class="px-3 py-1 text-[10px] font-semibold rounded bg-stone-200 hover:bg-white disabled:bg-stone-700 disabled:text-stone-500 text-stone-900 transition-colors"
           >
             Create
           </button>
         </div>
       </div>
-      <!-- Row 2: Description + Tags -->
-      <div class="flex flex-wrap gap-2">
-        <input
-          v-model="newTaskDescription"
-          type="text"
-          placeholder="Description (optional)..."
-          class="flex-1 min-w-[200px] px-3 py-1.5 text-xs rounded bg-stone-950 border border-stone-700/50 text-stone-200 placeholder-stone-600 focus:outline-none focus:border-stone-500"
-          @keydown.escape="showCreateForm = false"
-        />
-        <input
-          v-model="newTaskTagsRaw"
-          type="text"
-          placeholder="Tags (comma separated)..."
-          class="w-48 sm:w-48 max-sm:flex-1 max-sm:min-w-[150px] px-3 py-1.5 text-xs rounded bg-stone-950 border border-stone-700/50 text-stone-200 placeholder-stone-600 focus:outline-none focus:border-stone-500"
-          @keydown.escape="showCreateForm = false"
-        />
-      </div>
-    </div>
-
-    <!-- Priority Stack -->
-    <div class="flex-1 overflow-y-auto px-4 py-3 space-y-1">
-      <!-- Digest Panel -->
-      <DigestPanel />
 
       <!-- Loading -->
       <div v-if="loading" class="flex items-center justify-center py-12">
@@ -136,9 +145,6 @@
         <div class="text-4xl mb-3">🎯</div>
         <div class="text-lg text-stone-400 mb-1">No tasks yet</div>
         <div class="text-sm text-stone-600">Add a task above or let an agent create one via the API</div>
-        <div class="text-xs text-stone-700 mt-4 font-mono max-w-md">
-          curl -X POST localhost:4000/tasks -H 'Content-Type: application/json' -d '{"title":"My first task"}'
-        </div>
       </div>
 
       <!-- No filter results -->
@@ -162,6 +168,11 @@
         @archive="handleArchive"
         @reorder="handleReorder"
       />
+    </div>
+
+    <!-- ═══ DAILY DIGEST TAB ═══ -->
+    <div v-if="activeTab === 'digest'" class="flex-1 overflow-y-auto px-4 py-4">
+      <DigestPanel :force-expanded="true" />
     </div>
 
     <!-- Error toast -->
@@ -196,12 +207,15 @@ const {
 
 const { usage } = useUsage();
 
+// ── Tabs ─────────────────────────────────────────────────────────────
+
+const activeTab = ref<'prio' | 'digest'>('prio');
+
 // ── Filtering ──────────────────────────────────────────────────────────
 
 const activeFilter = ref<TaskStatus | null>(null);
 const activeTagFilters = reactive(new Set<string>());
 
-// Collect all unique tags across tasks
 const allTags = computed(() => {
   const tagSet = new Set<string>();
   for (const task of tasks.value) {
@@ -227,26 +241,23 @@ function clearFilters() {
   activeTagFilters.clear();
 }
 
-// Status filter definitions with dot colors and counts
+// Status filter definitions — new names + neon colors
 const filterOptions = computed(() => {
   const counts: Record<string, number> = {};
   for (const t of tasks.value) {
     counts[t.status] = (counts[t.status] || 0) + 1;
   }
   return [
-    { status: 'blocked' as TaskStatus, label: 'Blocked', dotClass: 'bg-red-500', count: counts['blocked'] || 0 },
-    { status: 'complete' as TaskStatus, label: 'Done', dotClass: 'bg-green-500', count: counts['complete'] || 0 },
-    { status: 'discovered' as TaskStatus, label: 'New', dotClass: 'bg-purple-400', count: counts['discovered'] || 0 },
-    { status: 'active' as TaskStatus, label: 'Active', dotClass: 'bg-amber-400', count: counts['active'] || 0 },
-    { status: 'queued' as TaskStatus, label: 'Queued', dotClass: 'bg-blue-400/50', count: counts['queued'] || 0 },
+    { status: 'blocked' as TaskStatus, label: 'Blocked', dotClass: 'bg-[#ff2d6f]', count: counts['blocked'] || 0 },
+    { status: 'discovered' as TaskStatus, label: 'Unrated', dotClass: 'bg-[#00e5ff]', count: counts['discovered'] || 0 },
+    { status: 'active' as TaskStatus, label: 'Active', dotClass: 'bg-[#ffee00]', count: counts['active'] || 0 },
+    { status: 'queued' as TaskStatus, label: 'Queued', dotClass: 'bg-[#c084fc]', count: counts['queued'] || 0 },
+    { status: 'complete' as TaskStatus, label: 'Done', dotClass: 'bg-[#39ff14]', count: counts['complete'] || 0 },
   ].filter(f => f.count > 0);
 });
 
 // ── Sorting ────────────────────────────────────────────────────────────
 
-// Sort: blocked first (needs attention), then complete (needs review),
-// then discovered (NEW, needs prioritization), then active, then queued.
-// Within each tier: by priority, then by sort_order.
 const statusTier: Record<string, number> = {
   blocked: 0,
   complete: 1,
@@ -270,7 +281,6 @@ const sortedTasks = computed(() => {
   });
 });
 
-// Apply filters on top of sort
 const filteredTasks = computed(() => {
   let result = sortedTasks.value;
 
@@ -297,13 +307,13 @@ const newTaskPriority = ref<TaskPriority>('P2');
 const newTaskStatus = ref<TaskStatus>('queued');
 const newTaskTagsRaw = ref('');
 
-// Auto-focus title input when form opens
-watch(showCreateForm, async (val) => {
-  if (val) {
+async function toggleCreateForm() {
+  showCreateForm.value = !showCreateForm.value;
+  if (showCreateForm.value) {
     await nextTick();
     titleInput.value?.focus();
   }
-});
+}
 
 async function handleCreateTask() {
   const title = newTaskTitle.value.trim();
@@ -374,9 +384,9 @@ const focusedIndex = ref(-1);
 const taskRowRefs: Record<number, HTMLElement> = {};
 
 function handleKeyNav(e: KeyboardEvent) {
-  // Don't capture when typing in inputs
   const tag = (e.target as HTMLElement)?.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  if (activeTab.value !== 'prio') return;
 
   const len = filteredTasks.value.length;
   if (len === 0) return;
@@ -398,7 +408,6 @@ function handleKeyNav(e: KeyboardEvent) {
     case ' ':
       if (focusedIndex.value >= 0) {
         e.preventDefault();
-        // Click the row to toggle expand
         const el = taskRowRefs[focusedIndex.value];
         if (el) {
           const clickTarget = el.querySelector('.flex.items-center.gap-2\\.5') as HTMLElement;
@@ -410,12 +419,10 @@ function handleKeyNav(e: KeyboardEvent) {
       focusedIndex.value = -1;
       break;
     case 'g':
-      // gg → go to top (vim style)
       focusedIndex.value = 0;
       scrollFocusedIntoView();
       break;
     case 'G':
-      // G → go to bottom
       focusedIndex.value = len - 1;
       scrollFocusedIntoView();
       break;

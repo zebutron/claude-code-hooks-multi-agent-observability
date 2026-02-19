@@ -51,10 +51,14 @@
       <!-- Spacer -->
       <div class="flex-1" />
 
-      <!-- Blocked reason (only for blocked — not a status label, actual useful info) -->
-      <span v-if="task.blocked_by" class="text-[10px] text-stone-400 truncate max-w-[200px] hidden sm:inline">
-        {{ task.blocked_reason }}
-      </span>
+      <!-- Blocked reason — red text, horizontal scroll with fade masks -->
+      <div v-if="task.blocked_by" class="blocked-reason-container hidden sm:block shrink-0 max-w-[280px]">
+        <div class="blocked-reason-scroll">
+          <span class="text-[10px] text-[#ff2d6f] font-medium whitespace-nowrap">
+            {{ task.blocked_reason }}
+          </span>
+        </div>
+      </div>
 
       <!-- Budget bars -->
       <div v-if="task.estimated_tokens || task.estimated_minutes" class="flex gap-3 shrink-0 hidden sm:flex">
@@ -136,21 +140,23 @@ const emit = defineEmits<{
 const isExpanded = ref(false);
 const isDragOver = ref(false);
 
-// Status colors — bright dots only
+// Status colors — neon palette, max contrast against stone-950
+// Blocked: neon red-fuchsia, Unrated: bright cyan, Active: bright yellow,
+// Queued: bright purple, Done: neon lime
 const statusBorderClass = computed(() => ({
-  'border-l-2 border-red-500': props.task.status === 'blocked',
-  'border-l-2 border-amber-400': props.task.status === 'active',
-  'border-l-2 border-blue-400/50': props.task.status === 'queued',
-  'border-l-2 border-green-500': props.task.status === 'complete',
-  'border-l-2 border-purple-400': props.task.status === 'discovered',
+  'border-l-2 border-[#ff2d6f]': props.task.status === 'blocked',
+  'border-l-2 border-[#ffee00]': props.task.status === 'active',
+  'border-l-2 border-[#c084fc]': props.task.status === 'queued',
+  'border-l-2 border-[#39ff14]': props.task.status === 'complete',
+  'border-l-2 border-[#00e5ff]': props.task.status === 'discovered',
 }));
 
 const statusDotClass = computed(() => ({
-  'bg-red-500 animate-pulse': props.task.status === 'blocked',
-  'bg-amber-400': props.task.status === 'active',
-  'bg-blue-400/50': props.task.status === 'queued',
-  'bg-green-500': props.task.status === 'complete',
-  'bg-purple-400': props.task.status === 'discovered',
+  'bg-[#ff2d6f] animate-pulse': props.task.status === 'blocked',
+  'bg-[#ffee00]': props.task.status === 'active',
+  'bg-[#c084fc]': props.task.status === 'queued',
+  'bg-[#39ff14]': props.task.status === 'complete',
+  'bg-[#00e5ff]': props.task.status === 'discovered',
 }));
 
 const tokenPercent = computed(() => {
@@ -242,7 +248,37 @@ function onRowClick() {
   animation: blocked-pulse 2s ease-in-out infinite;
 }
 @keyframes blocked-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-  50% { box-shadow: 0 0 10px 1px rgba(239, 68, 68, 0.25); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 45, 111, 0); }
+  50% { box-shadow: 0 0 10px 1px rgba(255, 45, 111, 0.2); }
+}
+.blocked-reason-container {
+  position: relative;
+}
+.blocked-reason-container::before,
+.blocked-reason-container::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 20px;
+  z-index: 1;
+  pointer-events: none;
+}
+.blocked-reason-container::before {
+  left: 0;
+  background: linear-gradient(to right, rgb(28 25 23 / 0.8), transparent);
+}
+.blocked-reason-container::after {
+  right: 0;
+  background: linear-gradient(to left, rgb(28 25 23 / 0.8), transparent);
+}
+.blocked-reason-scroll {
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: 0 8px;
+}
+.blocked-reason-scroll::-webkit-scrollbar {
+  display: none;
 }
 </style>
