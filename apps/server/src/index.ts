@@ -26,9 +26,22 @@ import {
   type TaskUpdate,
 } from './tasks';
 import { generateDigest, digestToMarkdown, digestToSlack } from './digest';
+import {
+  initResourceDB,
+  acquireResource,
+  heartbeatResource,
+  releaseResource,
+  getAllResourceState,
+  registerResource,
+} from './resources';
 
 // Initialize database
 initDatabase();
+
+// Initialize resource lock system (uses same DB file path pattern)
+import { Database } from 'bun:sqlite';
+const resourceDb = new Database('events.db');
+initResourceDB(resourceDb);
 
 // Store WebSocket clients
 const wsClients = new Set<any>();
@@ -635,6 +648,119 @@ const server = Bun.serve({
       return new Response(JSON.stringify(digest), {
         headers: { ...headers, 'Content-Type': 'application/json' }
       });
+    }
+
+    // ── Shared Resource Lock API ───────────────────────────────────────
+
+    // GET /resources - Get all resource states (locks, waiters)
+    if (url.pathname === '/resources' && req.method === 'GET') {
+      const state = getAllResourceState();
+      return new Response(JSON.stringify(state), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // POST /resources/:id/acquire - Acquire a resource lock
+    if (url.pathname.match(/^\/resources\/[^\/]+\/acquire$/) && req.method === 'POST') {
+      const resourceId = url.pathname.split('/')[2];
+      try {
+        const body = await req.json() as { session_id: string; description?: string; ttl_ms?: number };
+        if (!body.session_id) {
+          return new Response(JSON.stringify({ error: 'session_id is required' }), {
+            status: 400,
+            headers: { ...headers, 'Content-Type': 'application/json' }
+          });
+        }
+        const result = acquireResource(resourceId, body.session_id, body.description || '', body.ttl_ms);
+
+        // Broadcast lock state change to all WS clients
+        const state = getAllResourceState();
+        const message = JSON.stringify({ type: 'resource_update', data: state });
+        wsClients.forEach(client => {
+          try { client.send(message); } catch { wsClients.delete(client); }
+        });
+
+        return new Response(JSON.stringify(result), {
+          status: result.acquired ? 200 : 409,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      } catch {
+        return new Response(JSON.stringify({ error: 'Invalid request' }), {
+          status: 400,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // POST /resources/:id/heartbeat - Extend a lock lease
+    if (url.pathname.match(/^\/resources\/[^\/]+\/heartbeat$/) && req.method === 'POST') {
+      const resourceId = url.pathname.split('/')[2];
+      try {
+        const body = await req.json() as { session_id: string; ttl_ms?: number };
+        const lock = heartbeatResource(resourceId, body.session_id, body.ttl_ms);
+        if (!lock) {
+          return new Response(JSON.stringify({ error: 'Lock not held or expired' }), {
+            status: 404,
+            headers: { ...headers, 'Content-Type': 'application/json' }
+          });
+        }
+        return new Response(JSON.stringify(lock), {
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      } catch {
+        return new Response(JSON.stringify({ error: 'Invalid request' }), {
+          status: 400,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // POST /resources/:id/release - Release a lock
+    if (url.pathname.match(/^\/resources\/[^\/]+\/release$/) && req.method === 'POST') {
+      const resourceId = url.pathname.split('/')[2];
+      try {
+        const body = await req.json() as { session_id: string };
+        const released = releaseResource(resourceId, body.session_id);
+
+        // Broadcast
+        const state = getAllResourceState();
+        const message = JSON.stringify({ type: 'resource_update', data: state });
+        wsClients.forEach(client => {
+          try { client.send(message); } catch { wsClients.delete(client); }
+        });
+
+        return new Response(JSON.stringify({ released }), {
+          status: released ? 200 : 404,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      } catch {
+        return new Response(JSON.stringify({ error: 'Invalid request' }), {
+          status: 400,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // POST /resources/register - Register a new shared resource
+    if (url.pathname === '/resources/register' && req.method === 'POST') {
+      try {
+        const body = await req.json() as {
+          resource_id: string;
+          display_name: string;
+          description?: string;
+          default_ttl_ms?: number;
+        };
+        registerResource(body.resource_id, body.display_name, body.description, body.default_ttl_ms);
+        return new Response(JSON.stringify({ success: true }), {
+          status: 201,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      } catch {
+        return new Response(JSON.stringify({ error: 'Invalid request' }), {
+          status: 400,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
     }
 
     // WebSocket upgrade

@@ -29,9 +29,10 @@
         </button>
       </div>
 
-      <!-- Usage Meter (below tabs, always visible) -->
-      <div class="px-4 py-2">
-        <UsageMeter :usage="usage" />
+      <!-- Usage Meter + Resource Locks (below tabs, always visible) -->
+      <div class="px-4 py-2 flex items-center gap-4">
+        <UsageMeter :usage="usage" class="flex-1" />
+        <ResourceLocks />
       </div>
 
       <!-- Status filter chips + Tag filters (only on prio tab) -->
@@ -193,6 +194,7 @@ import { useUsage } from '../composables/useUsage';
 import TaskRow from '../components/TaskRow.vue';
 import UsageMeter from '../components/UsageMeter.vue';
 import DigestPanel from '../components/DigestPanel.vue';
+import ResourceLocks from '../components/ResourceLocks.vue';
 
 const {
   tasks,
