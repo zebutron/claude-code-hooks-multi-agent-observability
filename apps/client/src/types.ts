@@ -105,6 +105,13 @@ export interface UsageSummary {
   by_session: { session_id: string; tokens: number; model_name: string | null }[];
 }
 
+export interface ClaudeUsage {
+  five_hour: { utilization: number; resets_at: string } | null;
+  seven_day: { utilization: number; resets_at: string } | null;
+  seven_day_sonnet: { utilization: number; resets_at: string | null } | null;
+  cached_at: number;
+}
+
 export interface ChartConfig {
   maxDataPoints: number;
   animationDuration: number;

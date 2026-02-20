@@ -616,10 +616,45 @@ const server = Bun.serve({
 
     // ── Command Center: Usage API ──────────────────────────────────────
 
-    // GET /usage/summary
+    // GET /usage/summary — estimated usage from hook events (legacy/supplementary)
     if (url.pathname === '/usage/summary' && req.method === 'GET') {
       const summary = getUsageSummary();
       return new Response(JSON.stringify(summary), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // POST /usage/claude — receive real Claude usage data from bridge script
+    if (url.pathname === '/usage/claude' && req.method === 'POST') {
+      try {
+        const data = await req.json();
+        // Store in memory (volatile but fine — refreshed frequently)
+        (globalThis as any).__claude_usage_cache = {
+          ...data,
+          cached_at: Date.now(),
+        };
+
+        // Broadcast to WS clients
+        const message = JSON.stringify({ type: 'claude_usage', data: (globalThis as any).__claude_usage_cache });
+        wsClients.forEach(client => {
+          try { client.send(message); } catch { wsClients.delete(client); }
+        });
+
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      } catch {
+        return new Response(JSON.stringify({ error: 'Invalid request' }), {
+          status: 400,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // GET /usage/claude — return cached real Claude usage data
+    if (url.pathname === '/usage/claude' && req.method === 'GET') {
+      const cached = (globalThis as any).__claude_usage_cache || null;
+      return new Response(JSON.stringify(cached), {
         headers: { ...headers, 'Content-Type': 'application/json' }
       });
     }

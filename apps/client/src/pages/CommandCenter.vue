@@ -31,7 +31,7 @@
 
       <!-- Usage Meter + Resource Locks (below tabs, always visible) -->
       <div class="px-4 py-2 flex items-center gap-4">
-        <UsageMeter :usage="usage" class="flex-1" />
+        <UsageMeter :usage="usage" :claude-usage="claudeUsage" class="flex-1" />
         <ResourceLocks />
       </div>
 
@@ -207,7 +207,7 @@ const {
   reorderTask,
 } = useTaskTree();
 
-const { usage } = useUsage();
+const { usage, claudeUsage } = useUsage();
 
 // ── Tabs ─────────────────────────────────────────────────────────────
 
