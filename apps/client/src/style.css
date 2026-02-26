@@ -84,21 +84,34 @@ button:focus-visible {
   body {
     place-items: stretch; /* Allow full width on mobile */
   }
-  
+
   #app {
     max-width: none; /* Remove max-width constraint on mobile */
     padding: 0; /* Remove default padding on mobile */
     text-align: left; /* Left-align text on mobile for better readability */
   }
-  
-  /* Improve touch targets on mobile */
-  button, select, input[type="button"], input[type="submit"] {
+
+  /* Improve touch targets on mobile — primary interaction buttons only */
+  .filter-chip,
+  .task-row > div:first-child {
     min-height: 44px;
-    min-width: 44px;
   }
-  
+
+  /* Smaller buttons in detail views don't need 44px — they're in drilled-in context */
+  .detail-action-btn {
+    min-height: 32px;
+    min-width: 32px;
+  }
+
   /* Optimize text selection on mobile */
   * {
     -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Stack usage meter and resource locks on mobile */
+  header .flex.items-center.gap-4:last-of-type {
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: stretch;
   }
 }

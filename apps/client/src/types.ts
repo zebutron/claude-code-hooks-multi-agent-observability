@@ -112,6 +112,29 @@ export interface ClaudeUsage {
   cached_at: number;
 }
 
+// ── Agent Types ──────────────────────────────────────────────────────────
+
+export interface AgentInfo {
+  pid: number;
+  task_id: string;
+  task_title: string;
+  project_dir: string;
+  model: string | null;
+  started_at: number;
+  status: 'running' | 'completed' | 'failed' | 'stopped';
+  exit_code: number | null;
+  output_tail: string[];
+  prompt_summary: string;
+}
+
+export interface AgentStats {
+  running: number;
+  completed: number;
+  failed: number;
+  stopped: number;
+  total: number;
+}
+
 export interface ChartConfig {
   maxDataPoints: number;
   animationDuration: number;

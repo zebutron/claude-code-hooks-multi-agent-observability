@@ -5,6 +5,11 @@
       <!-- Title + Tabs -->
       <div class="px-4 pt-3 pb-0 flex items-center justify-between">
         <h1 class="text-lg font-bold text-stone-100">Command Center</h1>
+        <!-- Agent count badge -->
+        <div v-if="agentStats.running > 0" class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-500/30">
+          <span class="w-1.5 h-1.5 rounded-full bg-[#39ff14] animate-pulse" />
+          <span class="text-[10px] font-medium text-emerald-400">{{ agentStats.running }} agent{{ agentStats.running > 1 ? 's' : '' }}</span>
+        </div>
       </div>
 
       <!-- Tab bar -->
@@ -191,6 +196,7 @@ import { ref, computed, reactive, watch, nextTick, onMounted, onUnmounted } from
 import type { Task, TaskPriority, TaskStatus } from '../types';
 import { useTaskTree } from '../composables/useTaskTree';
 import { useUsage } from '../composables/useUsage';
+import { useAgents } from '../composables/useAgents';
 import TaskRow from '../components/TaskRow.vue';
 import UsageMeter from '../components/UsageMeter.vue';
 import DigestPanel from '../components/DigestPanel.vue';
@@ -208,6 +214,7 @@ const {
 } = useTaskTree();
 
 const { usage, claudeUsage } = useUsage();
+const { stats: agentStats } = useAgents();
 
 // ── Tabs ─────────────────────────────────────────────────────────────
 

@@ -160,10 +160,111 @@
       </div>
     </div>
 
-    <!-- Agent info -->
-    <div v-if="task.agent_session_id" class="text-xs text-stone-500">
-      Agent: <span class="font-mono text-stone-300">{{ task.agent_session_id.slice(0, 8) }}...</span>
-      <span v-if="task.last_agent_activity"> · last active {{ timeAgo(task.last_agent_activity) }}</span>
+    <!-- Agent delegation -->
+    <div class="bg-stone-900/60 border border-stone-700/40 rounded-lg p-3 space-y-2">
+      <div class="flex items-center justify-between">
+        <div class="text-[10px] font-semibold text-stone-500 uppercase tracking-wider">Agent</div>
+        <!-- Running agent indicator -->
+        <div v-if="runningAgent" class="flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-[#39ff14] animate-pulse" />
+          <span class="text-[10px] text-stone-400">PID {{ runningAgent.pid }}</span>
+        </div>
+      </div>
+
+      <!-- Agent currently running -->
+      <div v-if="runningAgent" class="space-y-2">
+        <div class="text-xs text-stone-300">
+          Running in <span class="font-mono text-stone-400">{{ runningAgent.project_dir.split('/').slice(-2).join('/') }}</span>
+          <span v-if="runningAgent.model" class="text-stone-500"> · {{ runningAgent.model }}</span>
+        </div>
+        <div v-if="task.last_agent_activity" class="text-[10px] text-stone-500">
+          Last active {{ timeAgo(task.last_agent_activity) }}
+        </div>
+        <!-- Output tail (last few lines) -->
+        <div v-if="runningAgent.output_tail.length" class="max-h-24 overflow-y-auto rounded bg-black/30 p-2">
+          <div
+            v-for="(line, i) in runningAgent.output_tail.slice(-8)"
+            :key="i"
+            class="text-[10px] font-mono text-stone-400 leading-tight"
+          >{{ line }}</div>
+        </div>
+        <button
+          @click="handleStopAgent"
+          :disabled="stoppingAgent"
+          class="px-3 py-1.5 text-xs font-medium rounded bg-red-950/60 border border-red-500/30 text-red-400 hover:bg-red-950 hover:border-red-500/50 transition-colors disabled:opacity-50"
+        >
+          {{ stoppingAgent ? 'Stopping...' : 'Stop Agent' }}
+        </button>
+      </div>
+
+      <!-- No agent running — show assign button -->
+      <div v-else-if="task.status !== 'complete' && task.status !== 'archived'">
+        <div v-if="task.agent_session_id" class="text-[10px] text-stone-500 mb-1.5">
+          Previous: <span class="font-mono">{{ task.agent_session_id.slice(0, 12) }}...</span>
+          <span v-if="task.last_agent_activity"> · {{ timeAgo(task.last_agent_activity) }}</span>
+        </div>
+        <!-- Assign form -->
+        <div v-if="showAssignForm" class="space-y-2">
+          <input
+            v-model="assignProjectDir"
+            type="text"
+            placeholder="Project dir (default: personal-os)"
+            class="w-full px-2 py-1 text-xs rounded bg-stone-950 border border-stone-700/50 text-stone-300 placeholder-stone-600 focus:outline-none focus:border-stone-500"
+          />
+          <div class="flex gap-2">
+            <select v-model="assignModel" class="px-2 py-1 text-[10px] rounded bg-stone-950 border border-stone-700/50 text-stone-300">
+              <option value="">Default model</option>
+              <option value="sonnet">Sonnet</option>
+              <option value="opus">Opus</option>
+              <option value="haiku">Haiku</option>
+            </select>
+            <input
+              v-model.number="assignMaxTurns"
+              type="number"
+              placeholder="Max turns"
+              min="1"
+              max="100"
+              class="w-20 px-2 py-1 text-[10px] rounded bg-stone-950 border border-stone-700/50 text-stone-300 placeholder-stone-600 focus:outline-none"
+            />
+          </div>
+          <textarea
+            v-model="assignScope"
+            placeholder="Scope description (optional — what dirs/resources are in scope)"
+            class="w-full px-2 py-1 text-xs rounded bg-stone-950 border border-stone-700/50 text-stone-300 placeholder-stone-600 focus:outline-none focus:border-stone-500 resize-none"
+            rows="2"
+          />
+          <div class="flex gap-2">
+            <button
+              @click="handleAssign"
+              :disabled="assigningAgent"
+              class="px-3 py-1.5 text-xs font-medium rounded bg-emerald-600 hover:bg-emerald-500 text-white transition-colors disabled:opacity-50"
+            >
+              {{ assigningAgent ? 'Spawning...' : 'Spawn Agent' }}
+            </button>
+            <button
+              @click="showAssignForm = false"
+              class="px-3 py-1.5 text-xs font-medium rounded bg-stone-700 hover:bg-stone-600 text-stone-200 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+          <div v-if="assignError" class="text-[10px] text-red-400">{{ assignError }}</div>
+        </div>
+        <!-- Simple assign button -->
+        <button
+          v-else
+          @click="showAssignForm = true"
+          class="px-3 py-1.5 text-xs font-medium rounded bg-stone-800 border border-stone-700/50 text-stone-300 hover:bg-stone-700 hover:text-stone-100 transition-colors"
+        >
+          Assign Agent
+        </button>
+      </div>
+
+      <!-- Completed/archived — just show history -->
+      <div v-else-if="task.agent_session_id" class="text-xs text-stone-500">
+        Completed by <span class="font-mono text-stone-400">{{ task.agent_session_id.slice(0, 12) }}...</span>
+      </div>
+      <div v-else class="text-xs text-stone-600 italic">No agent assigned</div>
     </div>
 
     <!-- Activity log (notes) -->
@@ -211,8 +312,9 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue';
-import type { Task } from '../types';
+import type { Task, AgentInfo } from '../types';
 import InlineUnblock from './InlineUnblock.vue';
+import { useAgents } from '../composables/useAgents';
 
 const props = defineProps<{
   task: Task;
@@ -223,6 +325,58 @@ const emit = defineEmits<{
   update: [updates: Partial<Task>];
   archive: [];
 }>();
+
+// ── Agent delegation ─────────────────────────────────────────────────
+
+const { assignAgent, stopAgent: stopAgentFn, getAgentForTask } = useAgents();
+
+const showAssignForm = ref(false);
+const assignProjectDir = ref('');
+const assignModel = ref('');
+const assignMaxTurns = ref<number | undefined>(undefined);
+const assignScope = ref('');
+const assigningAgent = ref(false);
+const stoppingAgent = ref(false);
+const assignError = ref('');
+
+const runningAgent = computed((): AgentInfo | undefined => {
+  return getAgentForTask(props.task.id);
+});
+
+async function handleAssign() {
+  assigningAgent.value = true;
+  assignError.value = '';
+  try {
+    await assignAgent(props.task.id, {
+      project_dir: assignProjectDir.value.trim() || undefined,
+      model: assignModel.value || undefined,
+      max_turns: assignMaxTurns.value || undefined,
+      scope_description: assignScope.value.trim() || undefined,
+    });
+    showAssignForm.value = false;
+    assignProjectDir.value = '';
+    assignModel.value = '';
+    assignMaxTurns.value = undefined;
+    assignScope.value = '';
+  } catch (e: any) {
+    assignError.value = e.message || 'Failed to assign agent';
+  } finally {
+    assigningAgent.value = false;
+  }
+}
+
+async function handleStopAgent() {
+  const agent = runningAgent.value;
+  if (!agent) return;
+  stoppingAgent.value = true;
+  try {
+    await stopAgentFn(agent.pid);
+  } catch (e: any) {
+    console.error('Failed to stop agent:', e);
+  } finally {
+    stoppingAgent.value = false;
+  }
+}
 
 // ── Inline editing: Rationale ────────────────────────────────────────
 

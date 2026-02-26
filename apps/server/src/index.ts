@@ -34,6 +34,15 @@ import {
   getAllResourceState,
   registerResource,
 } from './resources';
+import {
+  spawnAgent,
+  listAgents,
+  getAgent,
+  stopAgent,
+  cleanupFinishedAgents,
+  getAgentStats,
+  type SpawnOptions,
+} from './agents';
 
 // Initialize database
 initDatabase();
@@ -610,6 +619,112 @@ const server = Bun.serve({
       });
 
       return new Response(JSON.stringify({ success: true }), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // ── Command Center: Agent Spawner API ────────────────────────────────
+
+    // POST /tasks/:id/assign - Spawn an agent for a task
+    if (url.pathname.match(/^\/tasks\/[^\/]+\/assign$/) && req.method === 'POST') {
+      const id = url.pathname.split('/')[2];
+      try {
+        const body = await req.json() as SpawnOptions;
+        const result = spawnAgent(id, body);
+
+        if ('error' in result) {
+          return new Response(JSON.stringify({ error: result.error }), {
+            status: 400,
+            headers: { ...headers, 'Content-Type': 'application/json' }
+          });
+        }
+
+        // Broadcast task update (status changed to active)
+        const task = getTaskWithChildren(id);
+        if (task) {
+          const message = JSON.stringify({ type: 'task_update', data: task });
+          wsClients.forEach(client => {
+            try { client.send(message); } catch { wsClients.delete(client); }
+          });
+        }
+
+        // Broadcast agent update
+        const agentMsg = JSON.stringify({ type: 'agent_spawned', data: result });
+        wsClients.forEach(client => {
+          try { client.send(agentMsg); } catch { wsClients.delete(client); }
+        });
+
+        return new Response(JSON.stringify(result), {
+          status: 201,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: 'Invalid request' }), {
+          status: 400,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // GET /agents - List all tracked agents
+    if (url.pathname === '/agents' && req.method === 'GET') {
+      const agentList = listAgents();
+      return new Response(JSON.stringify(agentList), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // GET /agents/stats - Agent statistics
+    if (url.pathname === '/agents/stats' && req.method === 'GET') {
+      const stats = getAgentStats();
+      return new Response(JSON.stringify(stats), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // GET /agents/:pid - Get single agent info
+    if (url.pathname.match(/^\/agents\/\d+$/) && req.method === 'GET') {
+      const pid = parseInt(url.pathname.split('/')[2]);
+      const agent = getAgent(pid);
+      if (!agent) {
+        return new Response(JSON.stringify({ error: 'Agent not found' }), {
+          status: 404,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify(agent), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // POST /agents/:pid/stop - Stop a running agent
+    if (url.pathname.match(/^\/agents\/\d+\/stop$/) && req.method === 'POST') {
+      const pid = parseInt(url.pathname.split('/')[2]);
+      const stopped = stopAgent(pid);
+
+      if (!stopped) {
+        return new Response(JSON.stringify({ error: 'Agent not found' }), {
+          status: 404,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Broadcast agent stopped
+      const agent = getAgent(pid);
+      const message = JSON.stringify({ type: 'agent_stopped', data: { pid, agent } });
+      wsClients.forEach(client => {
+        try { client.send(message); } catch { wsClients.delete(client); }
+      });
+
+      return new Response(JSON.stringify({ stopped: true, pid }), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // POST /agents/cleanup - Remove finished agent records older than 1 hour
+    if (url.pathname === '/agents/cleanup' && req.method === 'POST') {
+      const cleaned = cleanupFinishedAgents();
+      return new Response(JSON.stringify({ cleaned }), {
         headers: { ...headers, 'Content-Type': 'application/json' }
       });
     }
