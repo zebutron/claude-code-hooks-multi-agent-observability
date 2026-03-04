@@ -4,7 +4,7 @@
     <header class="bg-stone-900 border-b border-stone-800">
       <!-- Title + Tabs -->
       <div class="px-4 pt-3 pb-0 flex items-center justify-between">
-        <h1 class="text-lg font-bold text-stone-100">Command Center</h1>
+        <h1 class="text-lg font-bold text-stone-100">CRABHUD</h1>
         <!-- Agent count badge -->
         <div v-if="agentStats.running > 0" class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-500/30">
           <span class="w-1.5 h-1.5 rounded-full bg-[#39ff14] animate-pulse" />
@@ -31,6 +31,15 @@
             : 'text-stone-500 border-transparent hover:text-stone-300'"
         >
           Daily Digest
+        </button>
+        <button
+          @click="activeTab = 'output'"
+          class="pb-2 text-sm font-medium border-b-2 transition-colors"
+          :class="activeTab === 'output'
+            ? 'text-stone-100 border-stone-100'
+            : 'text-stone-500 border-transparent hover:text-stone-300'"
+        >
+          Output
         </button>
       </div>
 
@@ -181,6 +190,123 @@
       <DigestPanel :force-expanded="true" />
     </div>
 
+    <!-- ═══ OUTPUT TAB ═══ -->
+    <div v-if="activeTab === 'output'" class="flex-1 flex flex-col overflow-hidden">
+
+      <!-- Output header: controls + PULSE button -->
+      <div class="px-4 py-3 border-b border-stone-800 bg-stone-900/50">
+        <!-- Heartbeat controls row -->
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center gap-4">
+            <!-- ON/OFF toggle -->
+            <button
+              @click="handleHeartbeatToggle"
+              class="relative w-14 h-7 rounded-full transition-colors duration-200 focus:outline-none"
+              :class="heartbeatStatus.enabled ? 'bg-[#39ff14]/30 border border-[#39ff14]/50' : 'bg-stone-800 border border-stone-700'"
+            >
+              <span
+                class="absolute top-0.5 left-0.5 w-6 h-6 rounded-full transition-transform duration-200 flex items-center justify-center text-[10px] font-bold"
+                :class="heartbeatStatus.enabled
+                  ? 'translate-x-7 bg-[#39ff14] text-stone-950'
+                  : 'translate-x-0 bg-[#ff2d6f] text-white'"
+              >
+                {{ heartbeatStatus.enabled ? 'ON' : 'OFF' }}
+              </span>
+            </button>
+
+            <!-- Frequency -->
+            <div class="flex items-center gap-1.5">
+              <span class="text-[10px] text-stone-500 uppercase tracking-wider">Every</span>
+              <input
+                v-model.number="frequencyInput"
+                type="number"
+                min="1"
+                max="1440"
+                class="w-16 px-2 py-1 text-xs font-mono rounded bg-stone-950 border border-stone-700/50 text-stone-200 focus:outline-none focus:border-stone-500"
+                @change="handleFrequencyChange"
+                @keydown.enter="($event.target as HTMLInputElement).blur()"
+              />
+              <span class="text-[10px] text-stone-500">min</span>
+            </div>
+
+            <!-- Next scheduled -->
+            <div v-if="heartbeatStatus.enabled && heartbeatStatus.nextScheduled" class="flex items-center gap-1.5">
+              <span class="text-[10px] text-stone-500 uppercase tracking-wider">Next</span>
+              <span class="text-xs font-mono text-stone-300">{{ formatTimestamp(heartbeatStatus.nextScheduled) }}</span>
+            </div>
+          </div>
+
+          <!-- PULSE button -->
+          <button
+            @click="handlePulse"
+            :disabled="heartbeatStatus.pulseRunning"
+            class="px-4 py-1.5 text-xs font-bold rounded-md transition-all"
+            :class="heartbeatStatus.pulseRunning
+              ? 'bg-stone-800 text-stone-500 cursor-wait'
+              : 'bg-[#ffee00]/20 border border-[#ffee00]/40 text-[#ffee00] hover:bg-[#ffee00]/30 hover:border-[#ffee00]/60'"
+          >
+            <span v-if="heartbeatStatus.pulseRunning" class="flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-[#ffee00] animate-pulse" />
+              PULSING...
+            </span>
+            <span v-else>⚡ PULSE</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Output log (scrollable) -->
+      <div class="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+        <!-- Loading -->
+        <div v-if="heartbeatLoading" class="flex items-center justify-center py-12">
+          <div class="text-stone-500 text-sm">Loading heartbeat outputs...</div>
+        </div>
+
+        <!-- Empty state -->
+        <div v-else-if="heartbeatOutputs.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
+          <div class="text-4xl mb-3">💓</div>
+          <div class="text-lg text-stone-400 mb-1">No heartbeat outputs yet</div>
+          <div class="text-sm text-stone-600">Hit PULSE to fire your first heartbeat</div>
+        </div>
+
+        <!-- Output entries -->
+        <div
+          v-else
+          v-for="(output, idx) in heartbeatOutputs"
+          :key="output.filename"
+          class="rounded-lg border overflow-hidden"
+          :class="idx === 0
+            ? 'border-stone-700/70 bg-stone-900/60'
+            : 'border-stone-800/50 bg-stone-900/30'"
+        >
+          <!-- Entry header -->
+          <div class="px-3 py-1.5 border-b flex items-center justify-between"
+            :class="idx === 0 ? 'border-stone-700/50 bg-stone-800/30' : 'border-stone-800/30'"
+          >
+            <div class="flex items-center gap-2">
+              <span v-if="idx === 0" class="w-1.5 h-1.5 rounded-full bg-[#39ff14]" />
+              <span class="text-[10px] font-mono" :class="idx === 0 ? 'text-stone-300' : 'text-stone-500'">
+                {{ output.date }}
+              </span>
+            </div>
+            <span class="text-[10px] font-mono text-stone-600">{{ output.filename }}</span>
+          </div>
+          <!-- Rendered markdown content -->
+          <div
+            class="px-4 py-3 prose prose-invert prose-sm max-w-none
+              prose-headings:text-stone-200 prose-headings:font-semibold prose-headings:mt-3 prose-headings:mb-1.5
+              prose-h1:text-base prose-h2:text-sm prose-h3:text-xs
+              prose-p:text-stone-400 prose-p:text-xs prose-p:leading-relaxed prose-p:my-1
+              prose-li:text-stone-400 prose-li:text-xs prose-li:my-0
+              prose-strong:text-stone-200
+              prose-code:text-[#c084fc] prose-code:text-[11px] prose-code:bg-stone-800/50 prose-code:px-1 prose-code:rounded
+              prose-blockquote:border-stone-700 prose-blockquote:text-stone-500 prose-blockquote:text-xs
+              prose-a:text-[#00e5ff] prose-a:no-underline hover:prose-a:underline"
+            v-html="renderMarkdown(output.content)"
+          />
+        </div>
+      </div>
+    </div>
+
     <!-- Error toast -->
     <div
       v-if="error"
@@ -197,6 +323,7 @@ import type { Task, TaskPriority, TaskStatus } from '../types';
 import { useTaskTree } from '../composables/useTaskTree';
 import { useUsage } from '../composables/useUsage';
 import { useAgents } from '../composables/useAgents';
+import { useHeartbeat } from '../composables/useHeartbeat';
 import TaskRow from '../components/TaskRow.vue';
 import UsageMeter from '../components/UsageMeter.vue';
 import DigestPanel from '../components/DigestPanel.vue';
@@ -215,10 +342,114 @@ const {
 
 const { usage, claudeUsage } = useUsage();
 const { stats: agentStats } = useAgents();
+const {
+  outputs: heartbeatOutputs,
+  status: heartbeatStatus,
+  loading: heartbeatLoading,
+  triggerPulse,
+  updateConfig: updateHeartbeatConfig,
+} = useHeartbeat();
 
 // ── Tabs ─────────────────────────────────────────────────────────────
 
-const activeTab = ref<'prio' | 'digest'>('prio');
+const activeTab = ref<'prio' | 'digest' | 'output'>('prio');
+
+// ── Heartbeat controls ──────────────────────────────────────────────
+
+const frequencyInput = ref(240);
+
+// Sync frequencyInput with heartbeat status
+watch(() => heartbeatStatus.value.frequencyMinutes, (val) => {
+  frequencyInput.value = val;
+}, { immediate: true });
+
+async function handleHeartbeatToggle() {
+  await updateHeartbeatConfig({ enabled: !heartbeatStatus.value.enabled });
+}
+
+async function handleFrequencyChange() {
+  const val = Math.max(1, Math.min(1440, frequencyInput.value || 240));
+  frequencyInput.value = val;
+  await updateHeartbeatConfig({ frequencyMinutes: val });
+}
+
+async function handlePulse() {
+  const result = await triggerPulse();
+  if (!result.success) {
+    console.error('Pulse failed:', result.error);
+  }
+}
+
+function formatTimestamp(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  } catch {
+    return iso;
+  }
+}
+
+// ── Simple markdown renderer ─────────────────────────────────────────
+// Converts markdown to HTML for display. Handles: headers, bold, italic,
+// code, blockquotes, lists, links. Not a full parser — good enough for
+// heartbeat outputs.
+function renderMarkdown(md: string): string {
+  let html = md
+    // Escape HTML
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    // Headers
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    // Blockquotes (restore > that we escaped)
+    .replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
+    // Bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Italic
+    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>')
+    // Inline code
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    // Links
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    // Unordered lists
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    // Horizontal rules
+    .replace(/^---$/gm, '<hr />')
+    // Paragraphs (double newlines)
+    .replace(/\n\n/g, '</p><p>')
+    // Single newlines within paragraphs
+    .replace(/\n/g, '<br />');
+
+  // Wrap consecutive <li> in <ul>
+  html = html.replace(/(<li>.*?<\/li>(?:<br \/>)?)+/gs, (match) => {
+    const cleaned = match.replace(/<br \/>/g, '');
+    return `<ul>${cleaned}</ul>`;
+  });
+
+  // Wrap in paragraph
+  html = `<p>${html}</p>`;
+
+  // Clean up empty paragraphs
+  html = html.replace(/<p><\/p>/g, '');
+  html = html.replace(/<p>(<h[123]>)/g, '$1');
+  html = html.replace(/(<\/h[123]>)<\/p>/g, '$1');
+  html = html.replace(/<p>(<ul>)/g, '$1');
+  html = html.replace(/(<\/ul>)<\/p>/g, '$1');
+  html = html.replace(/<p>(<hr \/>)/g, '$1');
+  html = html.replace(/(<hr \/>)<\/p>/g, '$1');
+  html = html.replace(/<p>(<blockquote>)/g, '$1');
+  html = html.replace(/(<\/blockquote>)<\/p>/g, '$1');
+
+  return html;
+}
 
 // ── Filtering ──────────────────────────────────────────────────────────
 

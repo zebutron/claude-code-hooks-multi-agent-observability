@@ -43,6 +43,13 @@ import {
   getAgentStats,
   type SpawnOptions,
 } from './agents';
+import {
+  initHeartbeat,
+  getHeartbeatOutputs,
+  triggerPulse,
+  getHeartbeatStatus,
+  updateHeartbeatConfig,
+} from './heartbeat';
 
 // Initialize database
 initDatabase();
@@ -51,6 +58,9 @@ initDatabase();
 import { Database } from 'bun:sqlite';
 const resourceDb = new Database('events.db');
 initResourceDB(resourceDb);
+
+// Initialize heartbeat system
+initHeartbeat();
 
 // Store WebSocket clients
 const wsClients = new Set<any>();
@@ -141,8 +151,9 @@ async function sendResponseToAgent(
 
 // Create Bun server with HTTP and WebSocket support
 const server = Bun.serve({
+  hostname: '127.0.0.1',
   port: parseInt(process.env.SERVER_PORT || '4000'),
-  
+
   async fetch(req: Request) {
     const url = new URL(req.url);
     
@@ -913,6 +924,85 @@ const server = Bun.serve({
       }
     }
 
+    // ── Heartbeat API ──────────────────────────────────────────────────
+
+    // GET /heartbeat/outputs - Get heartbeat output files
+    if (url.pathname === '/heartbeat/outputs' && req.method === 'GET') {
+      const limit = parseInt(url.searchParams.get('limit') || '20');
+      const outputs = await getHeartbeatOutputs(limit);
+      return new Response(JSON.stringify(outputs), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // GET /heartbeat/status - Get heartbeat state
+    if (url.pathname === '/heartbeat/status' && req.method === 'GET') {
+      return new Response(JSON.stringify(getHeartbeatStatus()), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // POST /heartbeat/pulse - Trigger manual heartbeat
+    if (url.pathname === '/heartbeat/pulse' && req.method === 'POST') {
+      // Non-blocking: start the pulse, respond immediately with status
+      const status = getHeartbeatStatus();
+      if (status.pulseRunning) {
+        return new Response(JSON.stringify({ success: false, error: 'A pulse is already running' }), {
+          status: 409,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Fire and forget — pulse runs in background, client polls for completion
+      triggerPulse().then(result => {
+        // Broadcast pulse completion via WebSocket
+        const msg = JSON.stringify({
+          type: 'heartbeat_pulse_complete',
+          data: result,
+          timestamp: new Date().toISOString(),
+        });
+        for (const ws of wsClients) {
+          try { ws.send(msg); } catch {}
+        }
+      });
+
+      return new Response(JSON.stringify({ success: true, message: 'Pulse started' }), {
+        status: 202,
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // PUT /heartbeat/config - Update heartbeat configuration
+    if (url.pathname === '/heartbeat/config' && req.method === 'PUT') {
+      try {
+        const body = await req.json() as { enabled?: boolean; frequencyMinutes?: number };
+        const result = await updateHeartbeatConfig(body);
+        if (result.success) {
+          // Broadcast config change via WebSocket
+          const msg = JSON.stringify({
+            type: 'heartbeat_config_changed',
+            data: getHeartbeatStatus(),
+            timestamp: new Date().toISOString(),
+          });
+          for (const ws of wsClients) {
+            try { ws.send(msg); } catch {}
+          }
+          return new Response(JSON.stringify({ ...result, status: getHeartbeatStatus() }), {
+            headers: { ...headers, 'Content-Type': 'application/json' }
+          });
+        }
+        return new Response(JSON.stringify(result), {
+          status: 500,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      } catch {
+        return new Response(JSON.stringify({ error: 'Invalid request body' }), {
+          status: 400,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
     // WebSocket upgrade
     if (url.pathname === '/stream') {
       const success = server.upgrade(req);
@@ -922,7 +1012,7 @@ const server = Bun.serve({
     }
     
     // Default response
-    return new Response('Multi-Agent Observability Server', {
+    return new Response('CRABHUD Server', {
       headers: { ...headers, 'Content-Type': 'text/plain' }
     });
   },

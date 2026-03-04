@@ -6,7 +6,7 @@
         <!-- Title Section - Hidden on mobile -->
         <div class="mobile:hidden">
           <h1 class="text-2xl font-bold text-white drop-shadow-lg">
-            Multi-Agent Observability
+            CRABHUD Timeline
           </h1>
         </div>
 
