@@ -8,12 +8,15 @@ export interface Task {
   title: string;
   description: string | null;
   rationale: string | null;
+  requirements: string | null;
   status: 'queued' | 'active' | 'blocked' | 'complete' | 'discovered' | 'archived';
   priority: 'P0' | 'P1' | 'P2' | 'P3';
   sort_order: number;
   roi_score: number;
   risk_score: number;
   fit_score: number;
+  time_score: number;
+  cost_score: number;
   estimated_tokens: number | null;
   actual_tokens: number;
   estimated_minutes: number | null;
@@ -38,12 +41,15 @@ export interface TaskCreate {
   parent_id?: string | null;
   description?: string;
   rationale?: string;
+  requirements?: string;
   status?: Task['status'];
   priority?: Task['priority'];
   sort_order?: number;
   roi_score?: number;
   risk_score?: number;
   fit_score?: number;
+  time_score?: number;
+  cost_score?: number;
   estimated_tokens?: number;
   estimated_minutes?: number;
   blocked_by?: Task['blocked_by'];
@@ -58,12 +64,15 @@ export interface TaskUpdate {
   title?: string;
   description?: string;
   rationale?: string;
+  requirements?: string;
   status?: Task['status'];
   priority?: Task['priority'];
   sort_order?: number;
   roi_score?: number;
   risk_score?: number;
   fit_score?: number;
+  time_score?: number;
+  cost_score?: number;
   estimated_tokens?: number;
   actual_tokens?: number;
   estimated_minutes?: number;
@@ -89,12 +98,15 @@ function rowToTask(row: any): Task {
     title: row.title,
     description: row.description,
     rationale: row.rationale,
+    requirements: row.requirements,
     status: row.status,
     priority: row.priority,
     sort_order: row.sort_order,
     roi_score: row.roi_score,
     risk_score: row.risk_score,
     fit_score: row.fit_score,
+    time_score: row.time_score ?? 0,
+    cost_score: row.cost_score ?? 0,
     estimated_tokens: row.estimated_tokens,
     actual_tokens: row.actual_tokens,
     estimated_minutes: row.estimated_minutes,
@@ -144,12 +156,15 @@ export function createTask(input: TaskCreate): Task {
     title: input.title,
     description: input.description ?? null,
     rationale: input.rationale ?? null,
+    requirements: input.requirements ?? null,
     status,
     priority: input.priority ?? 'P2',
     sort_order: input.sort_order ?? getNextSortOrder(parentId),
     roi_score: input.roi_score ?? 5,
     risk_score: input.risk_score ?? 5,
     fit_score: input.fit_score ?? 5,
+    time_score: input.time_score ?? 0,
+    cost_score: input.cost_score ?? 0,
     estimated_tokens: input.estimated_tokens ?? null,
     actual_tokens: 0,
     estimated_minutes: input.estimated_minutes ?? null,
@@ -170,14 +185,14 @@ export function createTask(input: TaskCreate): Task {
 
   const stmt = db.prepare(`
     INSERT INTO tasks (
-      id, parent_id, title, description, rationale, status, priority, sort_order,
-      roi_score, risk_score, fit_score, estimated_tokens, actual_tokens,
+      id, parent_id, title, description, rationale, requirements, status, priority, sort_order,
+      roi_score, risk_score, fit_score, time_score, cost_score, estimated_tokens, actual_tokens,
       estimated_minutes, actual_minutes, blocked_by, blocked_reason, blocked_since,
       agent_session_id, last_agent_activity, source, notes, tags, depth,
       created_at, updated_at, completed_at
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?
@@ -185,9 +200,9 @@ export function createTask(input: TaskCreate): Task {
   `);
 
   stmt.run(
-    task.id, task.parent_id, task.title, task.description, task.rationale,
+    task.id, task.parent_id, task.title, task.description, task.rationale, task.requirements,
     task.status, task.priority, task.sort_order,
-    task.roi_score, task.risk_score, task.fit_score,
+    task.roi_score, task.risk_score, task.fit_score, task.time_score, task.cost_score,
     task.estimated_tokens, task.actual_tokens,
     task.estimated_minutes, task.actual_minutes,
     task.blocked_by, task.blocked_reason, task.blocked_since,
@@ -290,12 +305,15 @@ export function updateTask(id: string, updates: TaskUpdate): Task | null {
     title: updates.title,
     description: updates.description,
     rationale: updates.rationale,
+    requirements: updates.requirements,
     status: updates.status,
     priority: updates.priority,
     sort_order: updates.sort_order,
     roi_score: updates.roi_score,
     risk_score: updates.risk_score,
     fit_score: updates.fit_score,
+    time_score: updates.time_score,
+    cost_score: updates.cost_score,
     estimated_tokens: updates.estimated_tokens,
     actual_tokens: updates.actual_tokens,
     estimated_minutes: updates.estimated_minutes,

@@ -166,6 +166,17 @@ export function initDatabase(): void {
     if (!taskCols.some((c: any) => c.name === 'tags')) {
       db.exec("ALTER TABLE tasks ADD COLUMN tags TEXT DEFAULT '[]'");
     }
+    if (!taskCols.some((c: any) => c.name === 'requirements')) {
+      db.exec("ALTER TABLE tasks ADD COLUMN requirements TEXT");
+    }
+    // Migration: rename roi_score/risk_score/fit_score conceptually to 0-9 scale
+    // (column names stay same for backward compat, but new items default to 0)
+    if (!taskCols.some((c: any) => c.name === 'time_score')) {
+      db.exec("ALTER TABLE tasks ADD COLUMN time_score INTEGER DEFAULT 0");
+    }
+    if (!taskCols.some((c: any) => c.name === 'cost_score')) {
+      db.exec("ALTER TABLE tasks ADD COLUMN cost_score INTEGER DEFAULT 0");
+    }
   } catch { /* table may not exist yet */ }
 
   // ── Command Center: Usage log table ──────────────────────────────────

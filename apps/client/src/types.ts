@@ -74,12 +74,15 @@ export interface Task {
   title: string;
   description: string | null;
   rationale: string | null;
+  requirements: string | null;
   status: TaskStatus;
   priority: TaskPriority;
   sort_order: number;
   roi_score: number;
   risk_score: number;
   fit_score: number;
+  time_score: number;
+  cost_score: number;
   estimated_tokens: number | null;
   actual_tokens: number;
   estimated_minutes: number | null;

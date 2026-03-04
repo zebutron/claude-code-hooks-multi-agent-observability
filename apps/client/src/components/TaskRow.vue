@@ -16,13 +16,13 @@
   >
     <!-- Collapsed Row -->
     <div
-      class="flex items-center gap-2 px-3 py-2 cursor-pointer select-none hover:bg-white/5 transition-colors"
+      class="flex items-center gap-1.5 px-3 py-2 cursor-pointer select-none hover:bg-white/5 transition-colors"
       @click="onRowClick"
+      @pointerdown="onPointerDown"
+      @pointerup="onPointerUp"
+      @pointerleave="onPointerLeave"
     >
-      <!-- Status dot -->
-      <span class="shrink-0 w-2 h-2 rounded-full" :class="statusDotClass" />
-
-      <!-- Priority badge (only P0/P1 — P2/P3 are default, no need to show) -->
+      <!-- Priority badge (only P0/P1) -->
       <span
         v-if="task.priority === 'P0'"
         class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded bg-red-500/20 text-red-400"
@@ -32,29 +32,30 @@
         class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded bg-amber-500/15 text-amber-400/80"
       >P1</span>
 
-      <!-- Title (smaller font, scrolls when expanded) -->
+      <!-- Inline title editing or display -->
       <div class="min-w-0 flex-1 overflow-hidden">
+        <div v-if="editingTitle" class="flex gap-1.5" @click.stop>
+          <input
+            ref="titleInput"
+            v-model="editTitleValue"
+            type="text"
+            class="flex-1 px-1.5 py-0.5 text-xs font-medium rounded bg-stone-900 border border-stone-500 text-stone-100 focus:outline-none focus:border-stone-300"
+            @keydown.enter="saveTitle"
+            @keydown.escape="cancelTitleEdit"
+            @blur="saveTitle"
+          />
+        </div>
         <div
+          v-else
           class="text-xs font-medium text-stone-100"
-          :class="isExpanded ? 'title-scroll' : 'truncate'"
+          :class="isExpanded ? 'whitespace-normal' : 'truncate'"
         >
-          <span ref="titleTextRef">{{ task.title }}</span>
+          {{ task.title }}
         </div>
       </div>
 
-      <!-- Tags -->
-      <div v-if="task.tags && task.tags.length" class="flex gap-1 shrink-0">
-        <span
-          v-for="tag in task.tags"
-          :key="tag"
-          class="text-[8px] font-medium px-1 py-0.5 rounded bg-stone-700/60 text-stone-400"
-        >
-          {{ tag }}
-        </span>
-      </div>
-
-      <!-- Blocked reason — red text, horizontal scroll with fade masks -->
-      <div v-if="task.blocked_by" class="blocked-reason-container hidden sm:block shrink-0 max-w-[200px]">
+      <!-- Blocked reason (collapsed) -->
+      <div v-if="task.blocked_by && !isExpanded" class="blocked-reason-container hidden sm:block shrink-0 max-w-[200px]">
         <div class="blocked-reason-scroll">
           <span class="text-[10px] text-[#ff2d6f] font-medium whitespace-nowrap">
             {{ task.blocked_reason }}
@@ -62,37 +63,7 @@
         </div>
       </div>
 
-      <!-- Budget bars -->
-      <div v-if="task.estimated_tokens || task.estimated_minutes" class="flex gap-3 shrink-0 hidden sm:flex">
-        <!-- Token bar -->
-        <div v-if="task.estimated_tokens" class="w-20">
-          <div class="h-1.5 bg-stone-700 rounded-full overflow-hidden">
-            <div
-              class="h-full rounded-full transition-all duration-500"
-              :class="barColor(tokenPercent)"
-              :style="{ width: tokenPercent + '%' }"
-            />
-          </div>
-          <div class="text-[9px] text-stone-400 mt-0.5 text-center font-mono">
-            {{ fmt(task.actual_tokens) }}/{{ fmt(task.estimated_tokens) }}
-          </div>
-        </div>
-        <!-- Time bar -->
-        <div v-if="task.estimated_minutes" class="w-20">
-          <div class="h-1.5 bg-stone-700 rounded-full overflow-hidden">
-            <div
-              class="h-full rounded-full transition-all duration-500"
-              :class="barColor(timePercent)"
-              :style="{ width: timePercent + '%' }"
-            />
-          </div>
-          <div class="text-[9px] text-stone-400 mt-0.5 text-center font-mono">
-            {{ task.actual_minutes }}m/{{ task.estimated_minutes }}m
-          </div>
-        </div>
-      </div>
-
-      <!-- Archive button (far right) -->
+      <!-- Archive button -->
       <button
         @click.stop="$emit('archive', task.id)"
         class="shrink-0 w-5 h-5 flex items-center justify-center rounded text-stone-700 hover:text-red-400 hover:bg-stone-800 transition-colors"
@@ -130,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, nextTick } from 'vue';
 import type { Task } from '../types';
 import TaskDetail from './TaskDetail.vue';
 
@@ -150,61 +121,69 @@ const emit = defineEmits<{
 
 const isExpanded = ref(false);
 const isDragOver = ref(false);
-const titleTextRef = ref<HTMLElement | null>(null);
 
-// Status colors — neon palette, max contrast against stone-950
-const statusBorderClass = computed(() => ({
+// ── Inline title editing via long-press ─────────────────────────────
+
+const editingTitle = ref(false);
+const editTitleValue = ref('');
+const titleInput = ref<HTMLInputElement | null>(null);
+let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+let didLongPress = false;
+
+function onPointerDown() {
+  didLongPress = false;
+  longPressTimer = setTimeout(() => {
+    didLongPress = true;
+    startTitleEdit();
+  }, 500);
+}
+
+function onPointerUp() {
+  if (longPressTimer) {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+}
+
+function onPointerLeave() {
+  if (longPressTimer) {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+}
+
+async function startTitleEdit() {
+  editTitleValue.value = props.task.title;
+  editingTitle.value = true;
+  await nextTick();
+  titleInput.value?.focus();
+  titleInput.value?.select();
+}
+
+function saveTitle() {
+  editingTitle.value = false;
+  const val = editTitleValue.value.trim();
+  if (val && val !== props.task.title) {
+    emit('update', props.task.id, { title: val });
+  }
+}
+
+function cancelTitleEdit() {
+  editingTitle.value = false;
+}
+
+// ── Status border (left edge color = status) ────────────────────────
+
+const statusBorderClass = {
   'border-l-2 border-[#ff2d6f]': props.task.status === 'blocked',
   'border-l-2 border-[#ffee00]': props.task.status === 'active',
   'border-l-2 border-[#c084fc]': props.task.status === 'queued',
   'border-l-2 border-[#39ff14]': props.task.status === 'complete',
   'border-l-2 border-[#00e5ff]': props.task.status === 'discovered',
-}));
+};
 
-const statusDotClass = computed(() => ({
-  'bg-[#ff2d6f] animate-pulse': props.task.status === 'blocked',
-  'bg-[#ffee00]': props.task.status === 'active',
-  'bg-[#c084fc]': props.task.status === 'queued',
-  'bg-[#39ff14]': props.task.status === 'complete',
-  'bg-[#00e5ff]': props.task.status === 'discovered',
-}));
+// ── Drag & drop ─────────────────────────────────────────────────────
 
-const tokenPercent = computed(() => {
-  if (!props.task.estimated_tokens) return 0;
-  return Math.min(100, (props.task.actual_tokens / props.task.estimated_tokens) * 100);
-});
-
-const timePercent = computed(() => {
-  if (!props.task.estimated_minutes) return 0;
-  return Math.min(100, (props.task.actual_minutes / props.task.estimated_minutes) * 100);
-});
-
-function barColor(pct: number): string {
-  if (pct > 90) return 'bg-red-500';
-  if (pct > 60) return 'bg-amber-500';
-  return 'bg-stone-400';
-}
-
-function fmt(n: number): string {
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-  if (n >= 1000) return (n / 1000).toFixed(0) + 'k';
-  return String(n);
-}
-
-// Title scroll animation when expanded
-watch(isExpanded, async (expanded) => {
-  if (expanded) {
-    await nextTick();
-    const el = titleTextRef.value;
-    if (el && el.scrollWidth > el.parentElement!.clientWidth) {
-      // Title overflows — start scroll animation
-      const overflow = el.scrollWidth - el.parentElement!.clientWidth;
-      el.style.setProperty('--scroll-distance', `-${overflow + 20}px`);
-    }
-  }
-});
-
-// Drag & drop
 let isDragging = false;
 
 function onDragStart(e: DragEvent) {
@@ -248,9 +227,10 @@ function onDrop(e: DragEvent) {
 }
 
 function onRowClick() {
-  if (!isDragging) {
+  if (!isDragging && !didLongPress && !editingTitle.value) {
     isExpanded.value = !isExpanded.value;
   }
+  didLongPress = false;
 }
 </script>
 
@@ -303,18 +283,5 @@ function onRowClick() {
 }
 .blocked-reason-scroll::-webkit-scrollbar {
   display: none;
-}
-
-/* Title scroll animation for expanded items with overflow */
-.title-scroll span {
-  display: inline-block;
-  white-space: nowrap;
-  animation: title-marquee 8s linear infinite;
-  animation-delay: 1s;
-}
-@keyframes title-marquee {
-  0%, 10% { transform: translateX(0); }
-  45%, 55% { transform: translateX(var(--scroll-distance, -100px)); }
-  90%, 100% { transform: translateX(0); }
 }
 </style>

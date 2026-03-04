@@ -1,221 +1,15 @@
 <template>
   <div class="px-4 py-3 border-t border-stone-700/30 bg-stone-950/50 space-y-3">
-    <!-- Blocked alert + inline unblock -->
-    <div v-if="task.blocked_by === 'human_input'" class="bg-red-950/40 border border-red-500/30 rounded-lg p-3">
-      <div class="text-xs font-semibold text-stone-200 mb-1">Needs your input</div>
-      <div class="text-sm text-stone-300 mb-2">{{ task.blocked_reason }}</div>
-      <InlineUnblock @submit="$emit('unblock', $event)" />
-    </div>
 
-    <div v-else-if="task.blocked_by" class="bg-amber-950/30 border border-amber-500/30 rounded-lg p-3">
-      <div class="text-xs font-semibold text-stone-200">
-        {{ task.blocked_by === 'dependency' ? 'Waiting on dependency' : 'Needs resource' }}
-      </div>
-      <div class="text-sm text-stone-300 mt-1">{{ task.blocked_reason }}</div>
-    </div>
+    <!-- 1. Scores: IMPACT / TIME / COST / RISK / FIT — all 0-9, click-to-edit -->
+    <div class="flex flex-wrap gap-2 sm:gap-3 text-xs">
+      <ScoreChip label="IMPACT" :value="task.roi_score" @click="cycleScore('roi_score')" />
+      <ScoreChip label="TIME" :value="task.time_score" @click="cycleScore('time_score')" />
+      <ScoreChip label="COST" :value="task.cost_score" @click="cycleScore('cost_score')" />
+      <ScoreChip label="RISK" :value="task.risk_score" @click="cycleScore('risk_score')" />
+      <ScoreChip label="FIT" :value="task.fit_score" @click="cycleScore('fit_score')" />
 
-    <!-- New/Discovered item: needs prioritization -->
-    <div v-if="task.status === 'discovered'" class="bg-purple-950/30 border border-purple-500/30 rounded-lg p-3">
-      <div class="text-xs text-stone-300 mb-2">AI-proposed — needs your prioritization</div>
-      <div class="flex gap-2">
-        <button
-          @click="$emit('update', { status: 'queued' })"
-          class="px-3 py-1.5 text-xs font-medium rounded bg-purple-600 hover:bg-purple-500 text-white transition-colors"
-        >
-          Approve &amp; Queue
-        </button>
-        <button
-          @click="$emit('archive')"
-          class="px-3 py-1.5 text-xs font-medium rounded bg-stone-700 hover:bg-stone-600 text-stone-200 transition-colors"
-        >
-          Dismiss
-        </button>
-      </div>
-    </div>
-
-    <!-- Completed: waiting for review -->
-    <div v-if="task.status === 'complete'" class="bg-green-950/30 border border-green-500/30 rounded-lg p-3">
-      <div class="text-xs text-stone-300 mb-2">Completed by agent — review and clear</div>
-      <div class="flex gap-2">
-        <button
-          @click="$emit('archive')"
-          class="px-3 py-1.5 text-xs font-medium rounded bg-green-600 hover:bg-green-500 text-white transition-colors"
-        >
-          Reviewed &amp; Archive
-        </button>
-        <button
-          @click="$emit('update', { status: 'active' })"
-          class="px-3 py-1.5 text-xs font-medium rounded bg-stone-700 hover:bg-stone-600 text-stone-200 transition-colors"
-        >
-          Reopen
-        </button>
-      </div>
-    </div>
-
-    <!-- Inline editable Title -->
-    <div class="flex items-center gap-2">
-      <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider w-10 shrink-0">Title</span>
-      <div v-if="editingTitle" class="flex-1 flex gap-2">
-        <input
-          ref="titleInput"
-          v-model="editTitleValue"
-          type="text"
-          class="flex-1 px-2 py-1 text-sm rounded bg-stone-900 border border-stone-600 text-stone-100 font-medium focus:outline-none focus:border-stone-400"
-          @keydown.enter="saveTitle"
-          @keydown.escape="editingTitle = false"
-          @blur="saveTitle"
-        />
-      </div>
-      <div
-        v-else
-        @click="startEditTitle"
-        class="flex-1 text-sm font-medium cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors text-stone-100"
-      >
-        {{ task.title }}
-      </div>
-    </div>
-
-    <!-- Inline editable Priority + Tags -->
-    <div class="flex items-center gap-3 flex-wrap">
-      <!-- Priority selector -->
-      <div class="flex items-center gap-1.5">
-        <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Priority</span>
-        <div class="flex gap-0.5">
-          <button
-            v-for="p in ['P0','P1','P2','P3']"
-            :key="p"
-            @click="$emit('update', { priority: p })"
-            class="px-1.5 py-0.5 text-[9px] font-bold rounded transition-colors"
-            :class="task.priority === p
-              ? priorityActiveClass(p)
-              : 'bg-stone-800 text-stone-600 hover:text-stone-400'"
-          >{{ p }}</button>
-        </div>
-      </div>
-
-      <!-- Tags editor -->
-      <div class="flex items-center gap-1.5 flex-1 min-w-0">
-        <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider shrink-0">Tags</span>
-        <div v-if="editingTags" class="flex-1 flex gap-1.5">
-          <input
-            ref="tagsInput"
-            v-model="editTagsValue"
-            type="text"
-            placeholder="comma,separated,tags"
-            class="flex-1 px-2 py-0.5 text-[10px] rounded bg-stone-900 border border-stone-600 text-stone-300 focus:outline-none focus:border-stone-400"
-            @keydown.enter="saveTags"
-            @keydown.escape="editingTags = false"
-            @blur="saveTags"
-          />
-        </div>
-        <div
-          v-else
-          @click="startEditTags"
-          class="flex gap-1 items-center cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors min-w-0"
-        >
-          <span
-            v-if="task.tags && task.tags.length"
-            v-for="tag in task.tags"
-            :key="tag"
-            class="text-[9px] font-medium px-1.5 py-0.5 rounded bg-stone-700/60 text-stone-400"
-          >{{ tag }}</span>
-          <span v-else class="text-[9px] text-stone-600 italic">+ add tags</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Goal (was Rationale) — click to edit -->
-    <div>
-      <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Goal</span>
-      <div v-if="editingRationale" class="mt-1">
-        <textarea
-          ref="rationaleInput"
-          v-model="editRationaleValue"
-          class="w-full px-2 py-1 text-xs rounded bg-stone-900 border border-stone-600 text-stone-200 italic focus:outline-none focus:border-stone-400 resize-none"
-          placeholder="What outcome does this achieve..."
-          rows="2"
-          @keydown.escape="editingRationale = false"
-          @blur="saveRationale"
-        />
-      </div>
-      <div
-        v-else
-        @click="startEditRationale"
-        class="text-xs italic cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors mt-0.5"
-        :class="task.rationale ? 'text-stone-300' : 'text-stone-600'"
-      >
-        {{ task.rationale || 'Add goal...' }}
-      </div>
-    </div>
-
-    <!-- Context (was Description) — click to edit -->
-    <div>
-      <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Context</span>
-      <div v-if="editingDescription" class="mt-1">
-        <textarea
-          ref="descriptionInput"
-          v-model="editDescriptionValue"
-          class="w-full px-2 py-1 text-xs rounded bg-stone-900 border border-stone-600 text-stone-200 focus:outline-none focus:border-stone-400 resize-none"
-          placeholder="Relevant background, constraints, resources..."
-          rows="3"
-          @keydown.escape="editingDescription = false"
-          @blur="saveDescription"
-        />
-      </div>
-      <div
-        v-else
-        @click="startEditDescription"
-        class="text-xs cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors mt-0.5"
-        :class="task.description ? 'text-stone-300' : 'text-stone-600'"
-      >
-        {{ task.description || 'Add context...' }}
-      </div>
-    </div>
-
-    <!-- Metrics — IMPACT / TIME / COST / RISK / FIT -->
-    <div class="flex flex-wrap gap-3 sm:gap-4 text-xs">
-      <button
-        @click="cycleScore('roi_score')"
-        class="flex items-center gap-1 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
-        title="Click to change IMPACT score (1-10)"
-      >
-        <span class="text-[9px] font-bold text-stone-600 uppercase">IMPACT</span>
-        <span class="font-bold text-stone-200">{{ task.roi_score }}</span>
-      </button>
-      <button
-        @click="cycleEstimatedMinutes"
-        class="flex items-center gap-1 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
-        title="Click to cycle TIME estimate"
-      >
-        <span class="text-[9px] font-bold text-stone-600 uppercase">TIME</span>
-        <span class="font-bold text-stone-200">{{ formatTime(task.estimated_minutes) }}</span>
-      </button>
-      <button
-        @click="cycleEstimatedTokens"
-        class="flex items-center gap-1 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
-        title="Click to cycle COST estimate"
-      >
-        <span class="text-[9px] font-bold text-stone-600 uppercase">COST</span>
-        <span class="font-bold text-stone-200">{{ formatCost(task.estimated_tokens) }}</span>
-      </button>
-      <button
-        @click="cycleScore('risk_score')"
-        class="flex items-center gap-1 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
-        title="Click to change RISK score (1-10)"
-      >
-        <span class="text-[9px] font-bold text-stone-600 uppercase">RISK</span>
-        <span class="font-bold text-stone-200">{{ task.risk_score }}</span>
-      </button>
-      <button
-        @click="cycleScore('fit_score')"
-        class="flex items-center gap-1 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
-        title="Click to change FIT score (1-10)"
-      >
-        <span class="text-[9px] font-bold text-stone-600 uppercase">FIT</span>
-        <span class="font-bold text-stone-200">{{ task.fit_score }}</span>
-      </button>
-
-      <!-- Quick status actions -->
+      <!-- Quick status actions (right side) -->
       <div class="flex-1" />
       <div class="flex gap-1.5">
         <button
@@ -245,7 +39,187 @@
       </div>
     </div>
 
-    <!-- Agent delegation — SPAWN -->
+    <!-- 2. Priority (dropdown) + Tags (click to edit) -->
+    <div class="flex items-center gap-3 flex-wrap">
+      <!-- Priority dropdown -->
+      <div class="relative" ref="priorityDropdownRef">
+        <button
+          @click="showPriorityDropdown = !showPriorityDropdown"
+          class="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors hover:bg-stone-800/60"
+          :class="priorityColor(task.priority)"
+        >
+          {{ task.priority }}
+          <span class="text-[8px] text-stone-500">▼</span>
+        </button>
+        <div
+          v-if="showPriorityDropdown"
+          class="absolute top-full left-0 mt-1 z-20 bg-stone-800 border border-stone-700 rounded shadow-lg overflow-hidden"
+        >
+          <button
+            v-for="p in ['P0','P1','P2','P3']"
+            :key="p"
+            @click="selectPriority(p)"
+            class="block w-full text-left px-3 py-1 text-[10px] font-bold hover:bg-stone-700 transition-colors"
+            :class="priorityColor(p)"
+          >{{ p }}</button>
+        </div>
+      </div>
+
+      <!-- Tags (click to edit) -->
+      <div class="flex items-center gap-1 flex-1 min-w-0">
+        <div v-if="editingTags" class="flex-1 flex gap-1.5" @click.stop>
+          <input
+            ref="tagsInput"
+            v-model="editTagsValue"
+            type="text"
+            placeholder="comma,separated,tags"
+            class="flex-1 px-2 py-0.5 text-[10px] rounded bg-stone-900 border border-stone-600 text-stone-300 focus:outline-none focus:border-stone-400"
+            @keydown.enter="saveTags"
+            @keydown.escape="editingTags = false"
+            @blur="saveTags"
+          />
+        </div>
+        <div
+          v-else
+          @click="startEditTags"
+          class="flex gap-1 items-center cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors min-w-0"
+        >
+          <span
+            v-if="task.tags && task.tags.length"
+            v-for="tag in task.tags"
+            :key="tag"
+            class="text-[9px] font-medium px-1.5 py-0.5 rounded bg-stone-700/60 text-stone-400"
+          >{{ tag }}</span>
+          <span v-else class="text-[9px] text-stone-600 italic">+ tags</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. BLOCKED alert + inline unblock -->
+    <div v-if="task.blocked_by === 'human_input'" class="bg-red-950/40 border border-red-500/30 rounded-lg p-3">
+      <div class="text-xs font-semibold text-[#ff2d6f] mb-1">BLOCKED</div>
+      <div class="text-sm text-stone-300 mb-2">{{ task.blocked_reason }}</div>
+      <InlineUnblock @submit="$emit('unblock', $event)" />
+    </div>
+
+    <div v-else-if="task.blocked_by" class="bg-amber-950/30 border border-amber-500/30 rounded-lg p-3">
+      <div class="text-xs font-semibold text-amber-400">
+        {{ task.blocked_by === 'dependency' ? 'Blocked: dependency' : 'Blocked: resource' }}
+      </div>
+      <div class="text-sm text-stone-300 mt-1">{{ task.blocked_reason }}</div>
+    </div>
+
+    <!-- New/Discovered item: needs prioritization -->
+    <div v-if="task.status === 'discovered'" class="bg-purple-950/30 border border-purple-500/30 rounded-lg p-3">
+      <div class="text-xs text-stone-300 mb-2">AI-proposed — needs your prioritization</div>
+      <div class="flex gap-2">
+        <button
+          @click="$emit('update', { status: 'queued' })"
+          class="px-3 py-1.5 text-xs font-medium rounded bg-purple-600 hover:bg-purple-500 text-white transition-colors"
+        >
+          Approve &amp; Queue
+        </button>
+        <button
+          @click="$emit('archive')"
+          class="px-3 py-1.5 text-xs font-medium rounded bg-stone-700 hover:bg-stone-600 text-stone-200 transition-colors"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+
+    <!-- Completed: waiting for review -->
+    <div v-if="task.status === 'complete'" class="bg-green-950/30 border border-green-500/30 rounded-lg p-3">
+      <div class="text-xs text-stone-300 mb-2">Completed — review and clear</div>
+      <div class="flex gap-2">
+        <button
+          @click="$emit('archive')"
+          class="px-3 py-1.5 text-xs font-medium rounded bg-green-600 hover:bg-green-500 text-white transition-colors"
+        >
+          Reviewed &amp; Archive
+        </button>
+        <button
+          @click="$emit('update', { status: 'active' })"
+          class="px-3 py-1.5 text-xs font-medium rounded bg-stone-700 hover:bg-stone-600 text-stone-200 transition-colors"
+        >
+          Reopen
+        </button>
+      </div>
+    </div>
+
+    <!-- 4. Goal (rationale) — click to edit -->
+    <div>
+      <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Goal</span>
+      <div v-if="editingRationale" class="mt-1" @click.stop>
+        <textarea
+          ref="rationaleInput"
+          v-model="editRationaleValue"
+          class="w-full px-2 py-1 text-xs rounded bg-stone-900 border border-stone-600 text-stone-200 italic focus:outline-none focus:border-stone-400 resize-none"
+          placeholder="What outcome does this achieve..."
+          rows="2"
+          @keydown.escape="editingRationale = false"
+          @blur="saveRationale"
+        />
+      </div>
+      <div
+        v-else
+        @click="startEditRationale"
+        class="text-xs italic cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors mt-0.5"
+        :class="task.rationale ? 'text-stone-300' : 'text-stone-600'"
+      >
+        {{ task.rationale || 'Add goal...' }}
+      </div>
+    </div>
+
+    <!-- 5. Context (description) — click to edit -->
+    <div>
+      <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Context</span>
+      <div v-if="editingDescription" class="mt-1" @click.stop>
+        <textarea
+          ref="descriptionInput"
+          v-model="editDescriptionValue"
+          class="w-full px-2 py-1 text-xs rounded bg-stone-900 border border-stone-600 text-stone-200 focus:outline-none focus:border-stone-400 resize-none"
+          placeholder="Why it matters, urgency, what surfaced it..."
+          rows="3"
+          @keydown.escape="editingDescription = false"
+          @blur="saveDescription"
+        />
+      </div>
+      <div
+        v-else
+        @click="startEditDescription"
+        class="text-xs cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors mt-0.5"
+        :class="task.description ? 'text-stone-300' : 'text-stone-600'"
+      >
+        {{ task.description || 'Add context...' }}
+      </div>
+    </div>
+
+    <!-- 6. Reqs (requirements) — click to edit -->
+    <div>
+      <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Reqs</span>
+      <div v-if="editingRequirements" class="mt-1" @click.stop>
+        <textarea
+          ref="requirementsInput"
+          v-model="editRequirementsValue"
+          class="w-full px-2 py-1 text-xs rounded bg-stone-900 border border-stone-600 text-stone-200 focus:outline-none focus:border-stone-400 resize-none"
+          placeholder="Access needed, freedoms granted, risks to watch..."
+          rows="3"
+          @keydown.escape="editingRequirements = false"
+          @blur="saveRequirements"
+        />
+      </div>
+      <div
+        v-else
+        @click="startEditRequirements"
+        class="text-xs cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors mt-0.5"
+        :class="task.requirements ? 'text-stone-300' : 'text-stone-600'"
+      >
+        {{ task.requirements || 'Add reqs...' }}
+      </div>
+    </div>
+
+    <!-- 7. Agent delegation — SPAWN -->
     <div class="bg-stone-900/60 border border-stone-700/40 rounded-lg p-3 space-y-2">
       <div class="flex items-center justify-between">
         <div class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Agent</div>
@@ -320,7 +294,7 @@
           />
           <textarea
             v-model="assignInstructions"
-            placeholder="Additional instructions for the agent (optional)..."
+            placeholder="Additional instructions for the agent..."
             class="w-full px-2 py-1 text-xs rounded bg-stone-950 border border-stone-700/50 text-stone-300 placeholder-stone-600 focus:outline-none focus:border-stone-500 resize-none"
             rows="2"
           />
@@ -402,9 +376,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import type { Task, AgentInfo } from '../types';
 import InlineUnblock from './InlineUnblock.vue';
+import ScoreChip from './ScoreChip.vue';
 import { useAgents } from '../composables/useAgents';
 
 const props = defineProps<{
@@ -472,26 +447,37 @@ async function handleStopAgent() {
   }
 }
 
-// ── Inline editing: Title ────────────────────────────────────────────
+// ── Priority dropdown ────────────────────────────────────────────────
 
-const editingTitle = ref(false);
-const editTitleValue = ref('');
-const titleInput = ref<HTMLInputElement | null>(null);
+const showPriorityDropdown = ref(false);
+const priorityDropdownRef = ref<HTMLElement | null>(null);
 
-async function startEditTitle() {
-  editTitleValue.value = props.task.title;
-  editingTitle.value = true;
-  await nextTick();
-  titleInput.value?.focus();
-}
-
-function saveTitle() {
-  editingTitle.value = false;
-  const val = editTitleValue.value.trim();
-  if (val && val !== props.task.title) {
-    emit('update', { title: val });
+function selectPriority(p: string) {
+  showPriorityDropdown.value = false;
+  if (p !== props.task.priority) {
+    emit('update', { priority: p } as any);
   }
 }
+
+function priorityColor(p: string): string {
+  switch (p) {
+    case 'P0': return 'text-red-400';
+    case 'P1': return 'text-amber-400';
+    case 'P2': return 'text-stone-300';
+    case 'P3': return 'text-stone-500';
+    default: return 'text-stone-300';
+  }
+}
+
+// Close priority dropdown on outside click
+function handleClickOutside(e: MouseEvent) {
+  if (priorityDropdownRef.value && !priorityDropdownRef.value.contains(e.target as Node)) {
+    showPriorityDropdown.value = false;
+  }
+}
+
+onMounted(() => document.addEventListener('click', handleClickOutside));
+onUnmounted(() => document.removeEventListener('click', handleClickOutside));
 
 // ── Inline editing: Tags ─────────────────────────────────────────────
 
@@ -557,55 +543,33 @@ function saveDescription() {
   }
 }
 
-// ── Score cycling ────────────────────────────────────────────────────
+// ── Inline editing: Requirements (Reqs) ──────────────────────────────
 
-function cycleScore(field: 'roi_score' | 'risk_score' | 'fit_score') {
-  const current = props.task[field];
-  const next = current >= 10 ? 1 : current + 1;
-  emit('update', { [field]: next } as any);
+const editingRequirements = ref(false);
+const editRequirementsValue = ref('');
+const requirementsInput = ref<HTMLTextAreaElement | null>(null);
+
+async function startEditRequirements() {
+  editRequirementsValue.value = props.task.requirements || '';
+  editingRequirements.value = true;
+  await nextTick();
+  requirementsInput.value?.focus();
 }
 
-// ── TIME cycling (estimated_minutes) ─────────────────────────────────
-const timeSteps = [null, 5, 15, 30, 60, 120, 240, 480];
-function cycleEstimatedMinutes() {
-  const current = props.task.estimated_minutes;
-  const idx = timeSteps.indexOf(current);
-  const next = timeSteps[(idx + 1) % timeSteps.length];
-  emit('update', { estimated_minutes: next } as any);
-}
-
-function formatTime(mins: number | null): string {
-  if (!mins) return '—';
-  if (mins < 60) return `${mins}m`;
-  return `${(mins / 60).toFixed(0)}h`;
-}
-
-// ── COST cycling (estimated_tokens) ──────────────────────────────────
-const costSteps = [null, 10000, 50000, 100000, 500000, 1000000];
-function cycleEstimatedTokens() {
-  const current = props.task.estimated_tokens;
-  const idx = costSteps.indexOf(current);
-  const next = costSteps[(idx + 1) % costSteps.length];
-  emit('update', { estimated_tokens: next } as any);
-}
-
-function formatCost(tokens: number | null): string {
-  if (!tokens) return '—';
-  if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
-  if (tokens >= 1000) return `${(tokens / 1000).toFixed(0)}k`;
-  return String(tokens);
-}
-
-// ── Priority active class helper ─────────────────────────────────────
-
-function priorityActiveClass(p: string): string {
-  switch (p) {
-    case 'P0': return 'bg-red-500/20 text-red-400';
-    case 'P1': return 'bg-amber-500/15 text-amber-400';
-    case 'P2': return 'bg-stone-700 text-stone-200';
-    case 'P3': return 'bg-stone-800 text-stone-400';
-    default: return 'bg-stone-700 text-stone-200';
+function saveRequirements() {
+  editingRequirements.value = false;
+  const val = editRequirementsValue.value.trim();
+  if (val !== (props.task.requirements || '')) {
+    emit('update', { requirements: val || undefined } as any);
   }
+}
+
+// ── Score cycling (0-9 loop) ─────────────────────────────────────────
+
+function cycleScore(field: string) {
+  const current = (props.task as any)[field] ?? 0;
+  const next = current >= 9 ? 0 : current + 1;
+  emit('update', { [field]: next } as any);
 }
 
 // ── Quick block ──────────────────────────────────────────────────────
