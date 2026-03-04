@@ -21,7 +21,7 @@
             ? 'text-stone-100 border-stone-100'
             : 'text-stone-500 border-transparent hover:text-stone-300'"
         >
-          Stack
+          STACK
         </button>
         <button
           @click="activeTab = 'digest'"
@@ -30,7 +30,7 @@
             ? 'text-stone-100 border-stone-100'
             : 'text-stone-500 border-transparent hover:text-stone-300'"
         >
-          Report
+          REPORT
         </button>
         <button
           @click="activeTab = 'output'"
@@ -39,7 +39,7 @@
             ? 'text-stone-100 border-stone-100'
             : 'text-stone-500 border-transparent hover:text-stone-300'"
         >
-          Log
+          LOG
         </button>
       </div>
 
@@ -73,13 +73,12 @@
         <button
           v-if="allTags.length"
           @click="showTagFilters = !showTagFilters"
-          class="ml-auto text-[10px] px-1.5 py-0.5 rounded transition-colors"
+          class="w-6 h-6 flex items-center justify-center rounded transition-colors flex-shrink-0"
           :class="showTagFilters || activeTagFilters.size > 0
-            ? 'text-stone-300 hover:text-stone-100'
+            ? 'text-stone-300 hover:text-stone-100 bg-stone-700/50'
             : 'text-stone-600 hover:text-stone-400'"
         >
-          {{ showTagFilters ? '▾ tags' : '▸ tags' }}
-          <span v-if="activeTagFilters.size > 0" class="ml-0.5 text-[#ffee00]">{{ activeTagFilters.size }}</span>
+          <span class="text-[10px]">{{ showTagFilters ? '▴' : '▾' }}</span>
         </button>
       </div>
       <!-- Tag filter chips (collapsible, hidden by default) -->

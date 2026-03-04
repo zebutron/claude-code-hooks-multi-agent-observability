@@ -2,21 +2,17 @@
  * Heartbeat management for CRABHUD
  *
  * Reads heartbeat markdown files from personal-os/heartbeat/
- * Manages pulse triggering and launchd scheduling
+ * Manages pulse triggering and in-process scheduling (no launchd dependency)
  */
 
-import { readdir, readFile, stat } from 'fs/promises';
-import { join, basename } from 'path';
-import { existsSync } from 'fs';
+import { readdir, readFile } from 'fs/promises';
+import { join } from 'path';
 
 const PERSONAL_OS_DIR = process.env.PERSONAL_OS_DIR || '/Users/zebrey/Documents/GitHub/personal-os';
 const HEARTBEAT_DIR = join(PERSONAL_OS_DIR, 'heartbeat');
-const PLIST_NAME = 'com.zeb.personal-os.heartbeat';
-const PLIST_PATH = join(process.env.HOME || '/Users/zebrey', 'Library/LaunchAgents', `${PLIST_NAME}.plist`);
-const PLIST_SOURCE = join(HEARTBEAT_DIR, `${PLIST_NAME}.plist`);
 const HEARTBEAT_SCRIPT = join(HEARTBEAT_DIR, 'run-heartbeat.sh');
 
-// In-memory state (populated from launchd on startup)
+// In-memory state + scheduler
 let heartbeatState = {
   enabled: false,
   frequencyMinutes: 240, // 4 hours default
@@ -24,6 +20,15 @@ let heartbeatState = {
   nextScheduled: null as string | null,
   pulseRunning: false,
 };
+
+let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Callback for broadcasting pulse completion (set by server)
+let onPulseComplete: ((result: { success: boolean; output?: string; error?: string }) => void) | null = null;
+
+export function setOnPulseComplete(cb: typeof onPulseComplete) {
+  onPulseComplete = cb;
+}
 
 /**
  * Get all heartbeat output files sorted by date descending
@@ -89,10 +94,9 @@ export async function triggerPulse(): Promise<{ success: boolean; output?: strin
     heartbeatState.pulseRunning = false;
     heartbeatState.lastPulse = new Date().toISOString();
 
-    // Recalculate next scheduled
+    // Reschedule next if enabled
     if (heartbeatState.enabled) {
-      const next = new Date(Date.now() + heartbeatState.frequencyMinutes * 60 * 1000);
-      heartbeatState.nextScheduled = next.toISOString();
+      scheduleNext();
     }
 
     if (exitCode !== 0) {
@@ -114,33 +118,34 @@ export function getHeartbeatStatus() {
 }
 
 /**
- * Check if heartbeat is loaded in launchd
+ * Schedule the next pulse
  */
-async function checkLaunchdStatus(): Promise<boolean> {
-  try {
-    const proc = Bun.spawn(['launchctl', 'list'], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const output = await new Response(proc.stdout).text();
-    return output.includes(PLIST_NAME);
-  } catch {
-    return false;
+function scheduleNext() {
+  if (schedulerTimer) {
+    clearTimeout(schedulerTimer);
+    schedulerTimer = null;
   }
+
+  const delayMs = heartbeatState.frequencyMinutes * 60 * 1000;
+  heartbeatState.nextScheduled = new Date(Date.now() + delayMs).toISOString();
+
+  schedulerTimer = setTimeout(async () => {
+    console.log('💓 Scheduled heartbeat pulse firing...');
+    const result = await triggerPulse();
+    if (onPulseComplete) onPulseComplete(result);
+    console.log(`💓 Pulse ${result.success ? 'complete' : 'failed: ' + result.error}`);
+  }, delayMs);
 }
 
 /**
- * Read frequency from plist file
+ * Stop the scheduler
  */
-async function readPlistFrequency(): Promise<number> {
-  try {
-    const content = await readFile(PLIST_SOURCE, 'utf-8');
-    const match = content.match(/<key>StartInterval<\/key>\s*<integer>(\d+)<\/integer>/);
-    if (match) {
-      return Math.round(parseInt(match[1]) / 60); // seconds to minutes
-    }
-  } catch { }
-  return 240; // default 4 hours
+function stopScheduler() {
+  if (schedulerTimer) {
+    clearTimeout(schedulerTimer);
+    schedulerTimer = null;
+  }
+  heartbeatState.nextScheduled = null;
 }
 
 /**
@@ -153,65 +158,25 @@ export async function updateHeartbeatConfig(config: {
   try {
     // Handle enable/disable
     if (config.enabled !== undefined && config.enabled !== heartbeatState.enabled) {
+      heartbeatState.enabled = config.enabled;
       if (config.enabled) {
-        // Copy plist to LaunchAgents if not there
-        if (!existsSync(PLIST_PATH)) {
-          const plistContent = await readFile(PLIST_SOURCE, 'utf-8');
-          await Bun.write(PLIST_PATH, plistContent);
+        if (config.frequencyMinutes !== undefined) {
+          heartbeatState.frequencyMinutes = config.frequencyMinutes;
         }
-        // Bootstrap into launchd
-        const proc = Bun.spawn(['launchctl', 'bootstrap', 'gui/501', PLIST_PATH], {
-          stdout: 'pipe',
-          stderr: 'pipe',
-        });
-        await proc.exited;
-        heartbeatState.enabled = true;
-        heartbeatState.nextScheduled = new Date(
-          Date.now() + (config.frequencyMinutes || heartbeatState.frequencyMinutes) * 60 * 1000
-        ).toISOString();
+        scheduleNext();
+        console.log(`💓 Heartbeat ON — next pulse in ${heartbeatState.frequencyMinutes}min`);
       } else {
-        // Bootout from launchd
-        const proc = Bun.spawn(['launchctl', 'bootout', `gui/501/${PLIST_NAME}`], {
-          stdout: 'pipe',
-          stderr: 'pipe',
-        });
-        await proc.exited;
-        heartbeatState.enabled = false;
-        heartbeatState.nextScheduled = null;
+        stopScheduler();
+        console.log('💓 Heartbeat OFF');
       }
     }
 
-    // Handle frequency change
+    // Handle frequency change (while enabled)
     if (config.frequencyMinutes !== undefined && config.frequencyMinutes !== heartbeatState.frequencyMinutes) {
-      const newFreqSeconds = config.frequencyMinutes * 60;
       heartbeatState.frequencyMinutes = config.frequencyMinutes;
-
-      // Update the plist source file
-      let plistContent = await readFile(PLIST_SOURCE, 'utf-8');
-      plistContent = plistContent.replace(
-        /(<key>StartInterval<\/key>\s*<integer>)\d+(<\/integer>)/,
-        `$1${newFreqSeconds}$2`
-      );
-      await Bun.write(PLIST_SOURCE, plistContent);
-
-      // If enabled, reload with new frequency
       if (heartbeatState.enabled) {
-        // Bootout + bootstrap to pick up new plist
-        await Bun.write(PLIST_PATH, plistContent);
-        try {
-          const bootout = Bun.spawn(['launchctl', 'bootout', `gui/501/${PLIST_NAME}`], {
-            stdout: 'pipe', stderr: 'pipe',
-          });
-          await bootout.exited;
-        } catch { }
-        const bootstrap = Bun.spawn(['launchctl', 'bootstrap', 'gui/501', PLIST_PATH], {
-          stdout: 'pipe', stderr: 'pipe',
-        });
-        await bootstrap.exited;
-
-        heartbeatState.nextScheduled = new Date(
-          Date.now() + config.frequencyMinutes * 60 * 1000
-        ).toISOString();
+        scheduleNext(); // Reschedule with new frequency
+        console.log(`💓 Heartbeat frequency → ${config.frequencyMinutes}min`);
       }
     }
 
@@ -222,23 +187,18 @@ export async function updateHeartbeatConfig(config: {
 }
 
 /**
- * Initialize heartbeat state from system
+ * Initialize heartbeat state
  */
 export async function initHeartbeat() {
-  heartbeatState.enabled = await checkLaunchdStatus();
-  heartbeatState.frequencyMinutes = await readPlistFrequency();
-
-  if (heartbeatState.enabled) {
-    heartbeatState.nextScheduled = new Date(
-      Date.now() + heartbeatState.frequencyMinutes * 60 * 1000
-    ).toISOString();
-  }
-
   // Find last pulse time from most recent heartbeat file
   const outputs = await getHeartbeatOutputs(1);
   if (outputs.length > 0) {
     heartbeatState.lastPulse = outputs[0].date;
   }
 
-  console.log(`💓 Heartbeat: ${heartbeatState.enabled ? 'ON' : 'OFF'} | ${heartbeatState.frequencyMinutes}min interval`);
+  // Start disabled — user toggles ON via CRABHUD UI
+  heartbeatState.enabled = false;
+  heartbeatState.frequencyMinutes = 240;
+
+  console.log(`💓 Heartbeat: OFF | ${heartbeatState.frequencyMinutes}min interval (toggle ON in CRABHUD)`);
 }

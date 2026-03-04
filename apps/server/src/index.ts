@@ -49,6 +49,7 @@ import {
   triggerPulse,
   getHeartbeatStatus,
   updateHeartbeatConfig,
+  setOnPulseComplete,
 } from './heartbeat';
 
 // Initialize database
@@ -59,11 +60,17 @@ import { Database } from 'bun:sqlite';
 const resourceDb = new Database('events.db');
 initResourceDB(resourceDb);
 
-// Initialize heartbeat system
-initHeartbeat();
-
 // Store WebSocket clients
 const wsClients = new Set<any>();
+
+// Initialize heartbeat system + wire up WebSocket broadcast for scheduled pulses
+initHeartbeat();
+setOnPulseComplete((result) => {
+  const msg = JSON.stringify({ type: 'heartbeat_pulse_complete', data: result });
+  for (const client of wsClients) {
+    try { client.send(msg); } catch {}
+  }
+});
 
 // Helper function to send response to agent via WebSocket
 async function sendResponseToAgent(
