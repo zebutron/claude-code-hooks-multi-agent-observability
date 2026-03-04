@@ -170,6 +170,8 @@
         @unblock="handleUnblock"
         @update="handleUpdate"
         @archive="handleArchive"
+        @reject="handleReject"
+        @done="handleDone"
         @reorder="handleReorder"
       />
     </div>
@@ -513,6 +515,7 @@ const {
   updateTask,
   unblockTask,
   archiveTask,
+  rejectTask,
   reorderTask,
 } = useTaskTree();
 
@@ -859,14 +862,18 @@ async function handleStopAgent(pid: number) {
 // ── Expand state (single expanded item, auto-scroll) ─────────────────
 
 const expandedTaskId = ref<string | null>(null);
+// Edit session: UUID generated on expand, groups all edits during this expand cycle
+let editSessionId: string | null = null;
 
 function handleToggleExpand(id: string) {
   if (expandedTaskId.value === id) {
-    // Collapsing — just collapse in place
+    // Collapsing — clear edit session
     expandedTaskId.value = null;
+    editSessionId = null;
   } else {
-    // Expanding — close previous, open new, scroll with buffer
+    // Expanding — start new edit session, scroll with buffer
     expandedTaskId.value = id;
+    editSessionId = crypto.randomUUID();
     nextTick(() => {
       const idx = filteredTasks.value.findIndex(t => t.id === id);
       const el = taskRowRefs[idx] as HTMLElement;
@@ -1026,7 +1033,7 @@ async function handleUnblock(id: string, response: string) {
 
 async function handleUpdate(id: string, updates: Partial<Task>) {
   try {
-    await updateTask(id, updates);
+    await updateTask(id, updates, editSessionId || undefined);
   } catch (e: any) {
     console.error('Failed to update task:', e);
   }
@@ -1035,8 +1042,42 @@ async function handleUpdate(id: string, updates: Partial<Task>) {
 async function handleArchive(id: string) {
   try {
     await archiveTask(id);
+    // If archiving the expanded item, clear edit session
+    if (expandedTaskId.value === id) {
+      expandedTaskId.value = null;
+      editSessionId = null;
+    }
   } catch (e: any) {
     console.error('Failed to archive task:', e);
+  }
+}
+
+/** Reject/delete a task — captures full snapshot + reason for alignment learning */
+async function handleReject(id: string, reason: string) {
+  try {
+    await rejectTask(id, reason);
+    // If rejecting the expanded item, clear edit session
+    if (expandedTaskId.value === id) {
+      expandedTaskId.value = null;
+      editSessionId = null;
+    }
+  } catch (e: any) {
+    console.error('Failed to reject task:', e);
+  }
+}
+
+/** DONE = mark complete + archive in one step */
+async function handleDone(id: string) {
+  try {
+    await updateTask(id, { status: 'complete' }, editSessionId || undefined);
+    await archiveTask(id);
+    // Clear edit session since item is gone
+    if (expandedTaskId.value === id) {
+      expandedTaskId.value = null;
+      editSessionId = null;
+    }
+  } catch (e: any) {
+    console.error('Failed to complete+archive task:', e);
   }
 }
 

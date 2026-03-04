@@ -20,6 +20,7 @@ import {
   reorderTask,
   unblockTask,
   archiveTask,
+  rejectTask,
   getUsageSummary,
   handleHookEvent,
   getTaskHistory,
@@ -542,9 +543,9 @@ const server = Bun.serve({
       const id = url.pathname.split('/')[2];
       try {
         const body = await req.json();
-        const { _changed_by, ...updates } = body as TaskUpdate & { _changed_by?: string };
+        const { _changed_by, _edit_session_id, ...updates } = body as TaskUpdate & { _changed_by?: string; _edit_session_id?: string };
         const changedBy = _changed_by || 'human';
-        const task = updateTask(id, updates, changedBy);
+        const task = updateTask(id, updates, changedBy, _edit_session_id);
         if (!task) {
           return new Response(JSON.stringify({ error: 'Task not found' }), {
             status: 404,
@@ -643,6 +644,32 @@ const server = Bun.serve({
       });
 
       return new Response(JSON.stringify({ success: true }), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // POST /tasks/:id/reject - Reject (delete) task as misaligned — strong learning signal
+    if (url.pathname.match(/^\/tasks\/[^\/]+\/reject$/) && req.method === 'POST') {
+      const id = url.pathname.split('/')[2];
+      let reason: string | undefined;
+      try {
+        const body = await req.json();
+        reason = body?.reason;
+      } catch { /* empty body is OK */ }
+      const result = rejectTask(id, reason);
+      if (!result.success) {
+        return new Response(JSON.stringify({ error: 'Task not found' }), {
+          status: 404,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+
+      const message = JSON.stringify({ type: 'task_rejected', data: { id, snapshot: result.snapshot } });
+      wsClients.forEach(client => {
+        try { client.send(message); } catch { wsClients.delete(client); }
+      });
+
+      return new Response(JSON.stringify({ success: true, rejected_snapshot: result.snapshot }), {
         headers: { ...headers, 'Content-Type': 'application/json' }
       });
     }

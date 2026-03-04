@@ -22,9 +22,9 @@
         </button>
         <button
           v-if="task.status === 'active'"
-          @click.stop="emitUpdate({ status: 'complete' })"
-          class="detail-action-btn"
-          title="Mark as complete"
+          @click.stop="$emit('done')"
+          class="detail-action-btn !bg-green-950/60 !border-green-500/30 !text-green-400 hover:!bg-green-950 hover:!border-green-500/50"
+          title="Mark complete and archive"
         >
           ✓ Done
         </button>
@@ -120,7 +120,7 @@
           Approve &amp; Queue
         </button>
         <button
-          @click.stop="$emit('archive')"
+          @click.stop="$emit('reject')"
           class="px-3 py-1.5 text-xs font-medium rounded bg-stone-700 hover:bg-stone-600 text-stone-200 transition-colors"
         >
           Dismiss
@@ -382,6 +382,8 @@ const emit = defineEmits<{
   unblock: [response: string];
   update: [updates: Partial<Task>];
   archive: [];
+  reject: [];
+  done: [];
 }>();
 
 // Wrapper to emit update without bubbling causing collapse

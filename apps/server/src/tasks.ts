@@ -313,7 +313,7 @@ export function getBlockedTasks(): Task[] {
   return (stmt.all() as any[]).map(rowToTask);
 }
 
-export function updateTask(id: string, updates: TaskUpdate, changedBy: string = 'human'): Task | null {
+export function updateTask(id: string, updates: TaskUpdate, changedBy: string = 'human', editSessionId?: string): Task | null {
   const existing = getTask(id);
   if (!existing) return null;
 
@@ -373,7 +373,9 @@ export function updateTask(id: string, updates: TaskUpdate, changedBy: string = 
   //                    changes were one coherent edit decision"
   //
   const snapshot = buildTaskSnapshot(existing);
-  const batchId = generateId();
+  // Use the client-provided edit session ID if given, otherwise generate one.
+  // Edit session ID groups all changes from one "expand → edit → collapse" cycle.
+  const batchId = editSessionId || generateId();
 
   const auditStmt = db.prepare(`
     INSERT INTO task_audit_log (task_id, field_name, old_value, new_value, changed_by, timestamp, task_snapshot, edit_batch_id)
@@ -620,6 +622,44 @@ export function archiveTask(id: string): boolean {
   const stmt = db.prepare("UPDATE tasks SET status = 'archived', updated_at = ? WHERE id = ? OR parent_id = ?");
   const result = stmt.run(now, id, id);
   return result.changes > 0;
+}
+
+/** Reject (delete) a task — the strongest alignment signal.
+ *  "This task was so wrong it shouldn't exist." Captures full task snapshot
+ *  and all field values before destruction so an alignment agent can learn
+ *  what kinds of tasks the human considers irrelevant or misaligned. */
+export function rejectTask(id: string, reason?: string): { success: boolean; snapshot?: any } {
+  const existing = getTask(id);
+  if (!existing) return { success: false };
+
+  const now = Date.now();
+  const snapshot = buildTaskSnapshot(existing);
+  const batchId = generateId();
+
+  // Write a rich audit entry capturing the full task before deletion
+  // new_value = the human's rejection reason (critical alignment signal)
+  const auditStmt = db.prepare(`
+    INSERT INTO task_audit_log (task_id, field_name, old_value, new_value, changed_by, timestamp, task_snapshot, edit_batch_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  auditStmt.run(
+    id,
+    '_rejected',
+    existing.title,         // old_value = the title that was rejected
+    reason || null,         // new_value = WHY it was rejected (alignment gold)
+    'human',
+    now,
+    snapshot,
+    batchId,
+  );
+
+  // Actually delete (not archive) — rejected tasks shouldn't persist
+  const deleteChildren = db.prepare('DELETE FROM tasks WHERE parent_id = ?');
+  const deleteTask = db.prepare('DELETE FROM tasks WHERE id = ?');
+  deleteChildren.run(id);
+  deleteTask.run(id);
+
+  return { success: true, snapshot: JSON.parse(snapshot) };
 }
 
 // ── Usage Log ────────────────────────────────────────────────────────────

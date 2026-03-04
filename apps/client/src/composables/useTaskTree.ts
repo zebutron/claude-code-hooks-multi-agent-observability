@@ -36,11 +36,14 @@ export function useTaskTree() {
     return task;
   }
 
-  async function updateTask(id: string, updates: Partial<Task>) {
+  async function updateTask(id: string, updates: Partial<Task>, editSessionId?: string) {
+    const body: any = { ...updates };
+    if (editSessionId) body._edit_session_id = editSessionId;
+
     const res = await fetch(`${API_BASE_URL}/tasks/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
+      body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const updated: Task = await res.json();
@@ -91,12 +94,23 @@ export function useTaskTree() {
     await fetchTasks();
   }
 
+  /** Reject (delete) a task — captures full snapshot + human reason for alignment learning */
+  async function rejectTask(id: string, reason: string) {
+    const res = await fetch(`${API_BASE_URL}/tasks/${id}/reject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await fetchTasks();
+  }
+
   function connectWebSocket() {
     ws = new WebSocket(WS_URL);
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === 'task_update' || msg.type === 'task_archived') {
+        if (msg.type === 'task_update' || msg.type === 'task_archived' || msg.type === 'task_rejected') {
           // Skip full refetch if we just did an in-place update (<500ms ago)
           // This prevents scroll-resetting double-fetches
           if (Date.now() - lastUpdateTs < 500) return;
@@ -134,5 +148,6 @@ export function useTaskTree() {
     reorderTask,
     unblockTask,
     archiveTask,
+    rejectTask,
   };
 }

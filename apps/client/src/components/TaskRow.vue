@@ -64,14 +64,64 @@
         </div>
       </div>
 
-      <!-- Archive button -->
+      <!-- Context-sensitive action button:
+           Non-complete tasks → ✕ (reject/delete — alignment learning signal)
+           Complete tasks → ✓ (archive — clear from view) -->
       <button
-        @click.stop="$emit('archive', task.id)"
+        v-if="task.status !== 'complete'"
+        @click.stop="startRejectConfirm"
         class="shrink-0 w-5 h-5 flex items-center justify-center rounded text-stone-700 hover:text-red-400 hover:bg-stone-800 transition-colors"
-        title="Archive"
+        title="Delete (reject as misaligned)"
       >
         <span class="text-[10px]">✕</span>
       </button>
+      <button
+        v-else
+        @click.stop="$emit('archive', task.id)"
+        class="shrink-0 w-5 h-5 flex items-center justify-center rounded text-stone-700 hover:text-green-400 hover:bg-stone-800 transition-colors"
+        title="Archive completed task"
+      >
+        <span class="text-[10px]">✓</span>
+      </button>
+    </div>
+
+    <!-- ── REJECT CONFIRMATION PANEL ── -->
+    <div v-if="showRejectConfirm" class="reject-confirm-panel" @click.stop>
+      <div class="text-[11px] font-bold text-red-400 uppercase tracking-wider mb-2">
+        Why are you deleting this?
+      </div>
+      <div class="text-[10px] text-stone-500 mb-2">
+        Your reasoning trains better task generation. Be specific — what made this task wrong, irrelevant, or misaligned?
+      </div>
+      <textarea
+        ref="rejectReasonInput"
+        v-model="rejectReason"
+        placeholder="e.g. 'Already done elsewhere', 'Not relevant to current goals', 'Agent hallucinated this dependency'..."
+        class="w-full px-2.5 py-2 text-xs rounded bg-stone-950 border text-stone-200 placeholder-stone-600 focus:outline-none resize-none transition-colors"
+        :class="rejectReason.trim() ? 'border-red-500/50 focus:border-red-400' : 'border-stone-700 focus:border-stone-500'"
+        rows="2"
+        @keydown.escape="cancelRejectConfirm"
+        @keydown.enter.ctrl="confirmReject"
+        @keydown.enter.meta="confirmReject"
+      />
+      <div class="flex items-center justify-between mt-2">
+        <button
+          @click.stop="cancelRejectConfirm"
+          class="px-3 py-1.5 text-[10px] font-medium rounded bg-stone-800 text-stone-400 hover:bg-stone-700 hover:text-stone-200 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          @click.stop="confirmReject"
+          :disabled="!rejectReason.trim()"
+          class="px-4 py-1.5 text-[10px] font-bold rounded uppercase tracking-wider transition-all"
+          :class="rejectReason.trim()
+            ? 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/30'
+            : 'bg-stone-800 text-stone-600 cursor-not-allowed'"
+        >
+          🗑 Delete
+        </button>
+      </div>
     </div>
 
     <!-- Drop indicator -->
@@ -84,6 +134,8 @@
       @unblock="$emit('unblock', task.id, $event)"
       @update="$emit('update', task.id, $event)"
       @archive="$emit('archive', task.id)"
+      @reject="startRejectConfirm"
+      @done="$emit('done', task.id)"
     />
 
     <!-- Children (recursive) -->
@@ -98,6 +150,8 @@
         @unblock="(id: string, resp: string) => $emit('unblock', id, resp)"
         @update="(id: string, upd: Partial<Task>) => $emit('update', id, upd)"
         @archive="(id: string) => $emit('archive', id)"
+        @reject="(id: string, reason: string) => $emit('reject', id, reason)"
+        @done="(id: string) => $emit('done', id)"
         @reorder="(id: string, order: number) => $emit('reorder', id, order)"
       />
     </div>
@@ -125,11 +179,39 @@ const emit = defineEmits<{
   unblock: [id: string, response: string];
   update: [id: string, updates: Partial<Task>];
   archive: [id: string];
+  reject: [id: string, reason: string];
+  done: [id: string];
   reorder: [id: string, sortOrder: number];
 }>();
 
 const rowEl = ref<HTMLElement | null>(null);
 const isDragOver = ref(false);
+
+// ── Reject confirmation (forces alignment reasoning) ────────────────
+
+const showRejectConfirm = ref(false);
+const rejectReason = ref('');
+const rejectReasonInput = ref<HTMLTextAreaElement | null>(null);
+
+async function startRejectConfirm() {
+  showRejectConfirm.value = true;
+  rejectReason.value = '';
+  await nextTick();
+  rejectReasonInput.value?.focus();
+}
+
+function cancelRejectConfirm() {
+  showRejectConfirm.value = false;
+  rejectReason.value = '';
+}
+
+function confirmReject() {
+  const reason = rejectReason.value.trim();
+  if (!reason) return;
+  emit('reject', props.task.id, reason);
+  showRejectConfirm.value = false;
+  rejectReason.value = '';
+}
 
 // ── Inline title editing via long-press ─────────────────────────────
 
@@ -265,6 +347,14 @@ defineExpose({ rowEl });
 @keyframes blocked-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(255, 45, 111, 0); }
   50% { box-shadow: 0 0 10px 1px rgba(255, 45, 111, 0.2); }
+}
+.reject-confirm-panel {
+  @apply px-4 py-3 bg-red-950/30 border-t border-red-500/20;
+  animation: reject-slide-in 0.15s ease-out;
+}
+@keyframes reject-slide-in {
+  from { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; }
+  to { opacity: 1; max-height: 200px; }
 }
 .blocked-reason-container {
   position: relative;
