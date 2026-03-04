@@ -22,6 +22,9 @@ import {
   archiveTask,
   getUsageSummary,
   handleHookEvent,
+  getTaskHistory,
+  getRecentEdits,
+  getAlignmentDiffs,
   type TaskCreate,
   type TaskUpdate,
 } from './tasks';
@@ -537,8 +540,10 @@ const server = Bun.serve({
     if (url.pathname.match(/^\/tasks\/[^\/]+$/) && req.method === 'PUT') {
       const id = url.pathname.split('/')[2];
       try {
-        const updates: TaskUpdate = await req.json();
-        const task = updateTask(id, updates);
+        const body = await req.json();
+        const { _changed_by, ...updates } = body as TaskUpdate & { _changed_by?: string };
+        const changedBy = _changed_by || 'human';
+        const task = updateTask(id, updates, changedBy);
         if (!task) {
           return new Response(JSON.stringify({ error: 'Task not found' }), {
             status: 404,
@@ -637,6 +642,37 @@ const server = Bun.serve({
       });
 
       return new Response(JSON.stringify({ success: true }), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // ── Command Center: Audit Log API ─────────────────────────────────
+
+    // GET /tasks/:id/history - Get audit trail for a specific task
+    if (url.pathname.match(/^\/tasks\/[^\/]+\/history$/) && req.method === 'GET') {
+      const id = url.pathname.split('/')[2];
+      const limit = parseInt(url.searchParams.get('limit') || '100');
+      const history = getTaskHistory(id, limit);
+      return new Response(JSON.stringify(history), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // GET /audit/recent - Get recent edits across all tasks
+    if (url.pathname === '/audit/recent' && req.method === 'GET') {
+      const limit = parseInt(url.searchParams.get('limit') || '50');
+      const changedBy = url.searchParams.get('changed_by') || undefined;
+      const edits = getRecentEdits(limit, changedBy);
+      return new Response(JSON.stringify(edits), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // GET /audit/alignment - Get alignment diffs (agent proposed → human edited)
+    if (url.pathname === '/audit/alignment' && req.method === 'GET') {
+      const limit = parseInt(url.searchParams.get('limit') || '100');
+      const diffs = getAlignmentDiffs(limit);
+      return new Response(JSON.stringify(diffs), {
         headers: { ...headers, 'Content-Type': 'application/json' }
       });
     }

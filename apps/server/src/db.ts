@@ -179,6 +179,24 @@ export function initDatabase(): void {
     }
   } catch { /* table may not exist yet */ }
 
+  // ── Command Center: Task Audit Log ────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS task_audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL,
+      field_name TEXT NOT NULL,
+      old_value TEXT,
+      new_value TEXT,
+      changed_by TEXT NOT NULL DEFAULT 'human',
+      timestamp INTEGER NOT NULL,
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_audit_task ON task_audit_log(task_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON task_audit_log(timestamp)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_audit_changed_by ON task_audit_log(changed_by)');
+
   // ── Command Center: Usage log table ──────────────────────────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS usage_log (

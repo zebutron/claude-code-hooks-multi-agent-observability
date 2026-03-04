@@ -53,15 +53,15 @@
         </button>
         <div
           v-if="showPriorityDropdown"
-          class="absolute top-full left-0 mt-1 z-20 bg-stone-800 border border-stone-700 rounded shadow-lg overflow-hidden"
+          class="absolute top-full left-0 mt-1 z-20 bg-stone-800 border border-stone-700 rounded shadow-lg overflow-hidden flex"
         >
           <button
-            v-for="p in ['P0','P1','P2','P3']"
+            v-for="p in ['P0','P1','P2','P3','P4','P5','P6','P7','P8','P9']"
             :key="p"
             @click.stop="selectPriority(p)"
-            class="block w-full text-left px-3 py-1 text-[10px] font-bold hover:bg-stone-700 transition-colors"
-            :class="priorityColor(p)"
-          >{{ p }}</button>
+            class="w-7 h-7 flex items-center justify-center text-[10px] font-bold hover:bg-stone-700 transition-colors"
+            :class="[priorityColor(p), p === task.priority ? 'bg-stone-600 ring-1 ring-stone-400' : '']"
+          >{{ p.slice(1) }}</button>
         </div>
       </div>
 
@@ -276,10 +276,9 @@
           />
           <div class="flex gap-2">
             <select v-model="assignModel" @click.stop class="px-2 py-1 text-[10px] rounded bg-stone-950 border border-stone-700/50 text-stone-300">
-              <option value="">Default model</option>
-              <option value="sonnet">Sonnet</option>
-              <option value="opus">Opus</option>
-              <option value="haiku">Haiku</option>
+              <option value="opus">Opus 4</option>
+              <option value="sonnet">Sonnet 4</option>
+              <option value="haiku">Haiku 3.5</option>
             </select>
             <input
               v-model.number="assignMaxTurns"
@@ -396,7 +395,7 @@ const { assignAgent, stopAgent: stopAgentFn, getAgentForTask } = useAgents();
 
 const agentExpanded = ref(false);
 const assignProjectDir = ref('');
-const assignModel = ref('');
+const assignModel = ref('opus');
 const assignMaxTurns = ref<number | undefined>(undefined);
 const assignScope = ref('');
 const assignInstructions = ref('');
@@ -458,10 +457,16 @@ function selectPriority(p: string) {
 
 function priorityColor(p: string): string {
   switch (p) {
-    case 'P0': return 'text-red-400';
-    case 'P1': return 'text-amber-400';
-    case 'P2': return 'text-stone-300';
-    case 'P3': return 'text-stone-500';
+    case 'P0': return 'text-fuchsia-400';
+    case 'P1': return 'text-red-400';
+    case 'P2': return 'text-orange-400';
+    case 'P3': return 'text-amber-400';
+    case 'P4': return 'text-yellow-300';
+    case 'P5': return 'text-stone-300';
+    case 'P6': return 'text-stone-400';
+    case 'P7': return 'text-stone-500';
+    case 'P8': return 'text-stone-500';
+    case 'P9': return 'text-stone-600';
     default: return 'text-stone-300';
   }
 }

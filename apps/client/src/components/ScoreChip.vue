@@ -11,10 +11,12 @@
         :class="scoreColor(safeValue)"
       >{{ safeValue }}</span>
     </button>
-    <!-- Score picker dropdown -->
+    <!-- Score picker dropdown — fixed center on screen -->
+    <Teleport to="body">
     <div
       v-if="showDropdown"
-      class="absolute top-full left-0 mt-1 z-30 bg-stone-800 border border-stone-700 rounded-lg shadow-lg overflow-hidden flex"
+      class="fixed z-50 bg-stone-800 border border-stone-700 rounded-lg shadow-lg overflow-hidden flex"
+      :style="dropdownStyle"
     >
       <button
         v-for="n in 10"
@@ -27,6 +29,7 @@
         ]"
       >{{ n - 1 }}</button>
     </div>
+    </Teleport>
   </div>
 </template>
 
@@ -48,8 +51,20 @@ const emit = defineEmits<{
 
 const showDropdown = ref(false);
 const chipRef = ref<HTMLElement | null>(null);
+const dropdownTop = ref(0);
 
 const safeValue = computed(() => props.value ?? 0);
+
+// Position the dropdown centered horizontally, just below the chip
+const dropdownStyle = computed(() => {
+  const pickerWidth = 10 * 28; // 10 buttons × w-7 (28px)
+  const screenW = typeof window !== 'undefined' ? window.innerWidth : 400;
+  const left = Math.max(8, (screenW - pickerWidth) / 2);
+  return {
+    top: `${dropdownTop.value}px`,
+    left: `${left}px`,
+  };
+});
 
 function scoreColor(v: number): string {
   if (props.highIsGood) {
@@ -70,6 +85,10 @@ function scoreColor(v: number): string {
 }
 
 function toggleDropdown() {
+  if (!showDropdown.value && chipRef.value) {
+    const rect = chipRef.value.getBoundingClientRect();
+    dropdownTop.value = rect.bottom + 4; // 4px gap below chip
+  }
   showDropdown.value = !showDropdown.value;
 }
 
@@ -79,9 +98,13 @@ function selectScore(n: number) {
 }
 
 function handleClickOutside(e: MouseEvent) {
-  if (chipRef.value && !chipRef.value.contains(e.target as Node)) {
-    showDropdown.value = false;
-  }
+  const target = e.target as Node;
+  // Check if click is inside chip
+  if (chipRef.value && chipRef.value.contains(target)) return;
+  // Check if click is inside the teleported dropdown (by checking z-50 fixed elements)
+  const el = e.target as HTMLElement;
+  if (el.closest?.('.fixed.z-50')) return;
+  showDropdown.value = false;
 }
 
 onMounted(() => document.addEventListener('click', handleClickOutside));

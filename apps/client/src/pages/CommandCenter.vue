@@ -117,10 +117,7 @@
         <!-- Extra fields (collapsed until title has content) -->
         <div v-if="newTaskTitle.trim()" class="px-3 pb-2 flex flex-wrap gap-2 items-center border-t border-stone-800/30 pt-2">
           <select v-model="newTaskPriority" class="px-2 py-1 text-[10px] rounded bg-stone-950 border border-stone-700/50 text-stone-300">
-            <option value="P0">P0</option>
-            <option value="P1">P1</option>
-            <option value="P2">P2</option>
-            <option value="P3">P3</option>
+            <option v-for="n in 10" :key="n-1" :value="'P'+(n-1)">P{{ n-1 }}</option>
           </select>
           <input
             v-model="newTaskTagsRaw"
@@ -868,13 +865,21 @@ function handleToggleExpand(id: string) {
     // Collapsing — just collapse in place
     expandedTaskId.value = null;
   } else {
-    // Expanding — close previous, open new, scroll to top of list area
+    // Expanding — close previous, open new, scroll with buffer
     expandedTaskId.value = id;
     nextTick(() => {
       const idx = filteredTasks.value.findIndex(t => t.id === id);
-      const el = taskRowRefs[idx];
+      const el = taskRowRefs[idx] as HTMLElement;
       if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Find the scroll container (parent with overflow-y-auto)
+        const scrollParent = el.closest('.overflow-y-auto') as HTMLElement;
+        if (scrollParent) {
+          const elTop = el.offsetTop - scrollParent.offsetTop;
+          // 12px buffer between header and expanded item
+          scrollParent.scrollTo({ top: elTop - 12, behavior: 'smooth' });
+        } else {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
       }
     });
   }

@@ -26,11 +26,11 @@
       <!-- Priority badge (only P0/P1) -->
       <span
         v-if="task.priority === 'P0'"
-        class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded bg-red-500/20 text-red-400"
+        class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-400"
       >P0</span>
       <span
         v-else-if="task.priority === 'P1'"
-        class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded bg-amber-500/15 text-amber-400/80"
+        class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded bg-red-500/20 text-red-400"
       >P1</span>
 
       <!-- Inline title editing or display -->

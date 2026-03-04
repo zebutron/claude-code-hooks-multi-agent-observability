@@ -8,7 +8,12 @@
  * receives task, scope, awareness boundary, and trust context in its prompt.
  */
 
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 import { getTask, updateTask, type Task } from './tasks';
+
+const TOKEN_CACHE_PATH = join(homedir(), '.local', 'state', 'crabhud', 'oauth-token');
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -149,12 +154,39 @@ export function spawnAgent(taskId: string, options: SpawnOptions = {}): AgentInf
   }
 
   // Spawn the process
-  // CRITICAL: unset CLAUDECODE env var to allow nested spawning
+  // CRITICAL: strip Claude Code session vars that block nesting,
+  // but preserve/inject the OAuth token for subscription-based auth
+  // (mirrors heartbeat.ts env-stripping logic)
+  const cleanEnv: Record<string, string | undefined> = { ...process.env };
+  const STRIP_VARS = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_AGENT_SDK_VERSION',
+    'CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES', 'CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL',
+    '__CFBundleIdentifier'];
+  for (const key of STRIP_VARS) delete cleanEnv[key];
+  // Strip MCP_ vars
+  for (const key of Object.keys(cleanEnv)) {
+    if (key.startsWith('MCP_')) delete cleanEnv[key];
+  }
+  // Strip all CLAUDE_ vars except the OAuth token
+  for (const key of Object.keys(cleanEnv)) {
+    if (key.startsWith('CLAUDE_') && key !== 'CLAUDE_CODE_OAUTH_TOKEN') delete cleanEnv[key];
+  }
+
+  // Inject OAuth token (from env or cached file) for subscription auth
+  let oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  if (!oauthToken) {
+    try {
+      if (existsSync(TOKEN_CACHE_PATH)) {
+        oauthToken = readFileSync(TOKEN_CACHE_PATH, 'utf-8').trim();
+      }
+    } catch {}
+  }
+  if (oauthToken) {
+    cleanEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
+  }
+
   const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (key !== 'CLAUDECODE' && value !== undefined) {
-      env[key] = value;
-    }
+  for (const [key, value] of Object.entries(cleanEnv)) {
+    if (value !== undefined) env[key] = value;
   }
 
   const proc = Bun.spawn(['claude', ...args], {
@@ -187,7 +219,7 @@ export function spawnAgent(taskId: string, options: SpawnOptions = {}): AgentInf
     status: 'active',
     agent_session_id: `agent-${pid}`,
     last_agent_activity: Date.now(),
-  });
+  }, `agent:${pid}`);
 
   // Stream stdout
   if (proc.stdout) {
@@ -290,7 +322,7 @@ export function stopAgent(pid: number): boolean {
     updateTask(agent.task_id, {
       status: 'queued',
       agent_session_id: undefined,
-    });
+    }, 'system');
   }
 
   console.log(`[Agent] Stopped PID ${pid} (task: ${agent.task_id})`);

@@ -7,6 +7,7 @@ export function useTaskTree() {
   const loading = ref(false);
   const error = ref<string | null>(null);
   let ws: WebSocket | null = null;
+  let lastUpdateTs = 0; // Track when we last did an in-place update
 
   async function fetchTasks() {
     loading.value = true;
@@ -42,9 +43,24 @@ export function useTaskTree() {
       body: JSON.stringify(updates),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const task: Task = await res.json();
-    await fetchTasks();
-    return task;
+    const updated: Task = await res.json();
+
+    // Optimistic in-place update (preserves scroll position — no full refetch)
+    function patchInPlace(list: Task[]): boolean {
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].id === id) {
+          // Preserve children from existing tree
+          list[i] = { ...updated, children: list[i].children };
+          return true;
+        }
+        if (list[i].children && patchInPlace(list[i].children!)) return true;
+      }
+      return false;
+    }
+    patchInPlace(tasks.value);
+    lastUpdateTs = Date.now();
+
+    return updated;
   }
 
   async function reorderTask(id: string, sortOrder: number) {
@@ -81,7 +97,9 @@ export function useTaskTree() {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'task_update' || msg.type === 'task_archived') {
-          // Re-fetch full tree on any task change
+          // Skip full refetch if we just did an in-place update (<500ms ago)
+          // This prevents scroll-resetting double-fetches
+          if (Date.now() - lastUpdateTs < 500) return;
           fetchTasks();
         }
       } catch {

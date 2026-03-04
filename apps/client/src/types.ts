@@ -65,7 +65,7 @@ export interface ChartDataPoint {
 // ── Command Center Types ───────────────────────────────────────────────
 
 export type TaskStatus = 'queued' | 'active' | 'blocked' | 'complete' | 'discovered' | 'archived';
-export type TaskPriority = 'P0' | 'P1' | 'P2' | 'P3';
+export type TaskPriority = 'P0' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8' | 'P9';
 export type BlockedBy = 'human_input' | 'dependency' | 'resource';
 
 export interface Task {

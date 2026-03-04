@@ -10,7 +10,7 @@ export interface Task {
   rationale: string | null;
   requirements: string | null;
   status: 'queued' | 'active' | 'blocked' | 'complete' | 'discovered' | 'archived';
-  priority: 'P0' | 'P1' | 'P2' | 'P3';
+  priority: 'P0' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8' | 'P9';
   sort_order: number;
   roi_score: number;
   risk_score: number;
@@ -211,6 +211,13 @@ export function createTask(input: TaskCreate): Task {
     task.created_at, task.updated_at, task.completed_at
   );
 
+  // Audit log: record task creation
+  const auditStmt = db.prepare(`
+    INSERT INTO task_audit_log (task_id, field_name, old_value, new_value, changed_by, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  auditStmt.run(task.id, '_created', null, task.title, task.source, now);
+
   return task;
 }
 
@@ -269,14 +276,14 @@ export function getBlockedTasks(): Task[] {
     SELECT * FROM tasks
     WHERE blocked_by IS NOT NULL AND status = 'blocked'
     ORDER BY
-      CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 3 END,
+      CAST(SUBSTR(priority, 2) AS INTEGER),
       roi_score DESC,
       blocked_since ASC
   `);
   return (stmt.all() as any[]).map(rowToTask);
 }
 
-export function updateTask(id: string, updates: TaskUpdate): Task | null {
+export function updateTask(id: string, updates: TaskUpdate, changedBy: string = 'human'): Task | null {
   const existing = getTask(id);
   if (!existing) return null;
 
@@ -325,6 +332,33 @@ export function updateTask(id: string, updates: TaskUpdate): Task | null {
     notes: updates.notes,
   };
 
+  // ── Audit log: capture field-level diffs before writing ─────────────
+  const auditStmt = db.prepare(`
+    INSERT INTO task_audit_log (task_id, field_name, old_value, new_value, changed_by, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  // Audit regular fields
+  for (const [key, value] of Object.entries(fieldMap)) {
+    if (value !== undefined) {
+      const oldVal = (existing as any)[key];
+      const newVal = value;
+      // Only log if the value actually changed
+      if (String(oldVal ?? '') !== String(newVal ?? '')) {
+        auditStmt.run(id, key, String(oldVal ?? ''), String(newVal ?? ''), changedBy, now);
+      }
+    }
+  }
+
+  // Audit tags separately (compare as JSON)
+  if ((updates as any).tags !== undefined) {
+    const oldTags = JSON.stringify(existing.tags || []);
+    const newTags = JSON.stringify((updates as any).tags || []);
+    if (oldTags !== newTags) {
+      auditStmt.run(id, 'tags', oldTags, newTags, changedBy, now);
+    }
+  }
+
   for (const [key, value] of Object.entries(fieldMap)) {
     if (value !== undefined) {
       fields.push(`${key} = ?`);
@@ -352,6 +386,69 @@ export function updateTask(id: string, updates: TaskUpdate): Task | null {
   stmt.run(...values, id);
 
   return getTask(id);
+}
+
+// ── Audit Log Queries ───────────────────────────────────────────────────
+
+export interface AuditEntry {
+  id: number;
+  task_id: string;
+  field_name: string;
+  old_value: string | null;
+  new_value: string | null;
+  changed_by: string;
+  timestamp: number;
+}
+
+export function getTaskHistory(taskId: string, limit: number = 100): AuditEntry[] {
+  const stmt = db.prepare(`
+    SELECT * FROM task_audit_log
+    WHERE task_id = ?
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `);
+  return stmt.all(taskId, limit) as AuditEntry[];
+}
+
+export function getRecentEdits(limit: number = 50, changedBy?: string): AuditEntry[] {
+  if (changedBy) {
+    const stmt = db.prepare(`
+      SELECT * FROM task_audit_log
+      WHERE changed_by = ?
+      ORDER BY timestamp DESC
+      LIMIT ?
+    `);
+    return stmt.all(changedBy, limit) as AuditEntry[];
+  }
+  const stmt = db.prepare(`
+    SELECT * FROM task_audit_log
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `);
+  return stmt.all(limit) as AuditEntry[];
+}
+
+export function getAlignmentDiffs(limit: number = 100): { task_id: string; field_name: string; agent_value: string | null; human_value: string | null; timestamp: number }[] {
+  // Find fields where an agent set a value and then a human changed it
+  // This is the key alignment signal: "what manager proposed" vs "what Zeb edited"
+  const stmt = db.prepare(`
+    SELECT h.task_id, h.field_name,
+           h.old_value as agent_value,
+           h.new_value as human_value,
+           h.timestamp
+    FROM task_audit_log h
+    WHERE h.changed_by = 'human'
+      AND EXISTS (
+        SELECT 1 FROM task_audit_log a
+        WHERE a.task_id = h.task_id
+          AND a.field_name = h.field_name
+          AND a.changed_by LIKE 'agent:%'
+          AND a.timestamp < h.timestamp
+      )
+    ORDER BY h.timestamp DESC
+    LIMIT ?
+  `);
+  return stmt.all(limit) as any[];
 }
 
 export function reorderTask(id: string, newSortOrder: number): Task | null {
