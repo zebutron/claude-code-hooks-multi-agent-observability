@@ -1,5 +1,6 @@
 <template>
   <div
+    ref="rowEl"
     class="task-row"
     :class="[
       statusBorderClass,
@@ -14,7 +15,7 @@
     @dragleave="onDragLeave"
     @drop.prevent="onDrop"
   >
-    <!-- Collapsed Row -->
+    <!-- Collapsed Row (click to toggle) -->
     <div
       class="flex items-center gap-1.5 px-3 py-2 cursor-pointer select-none hover:bg-white/5 transition-colors"
       @click="onRowClick"
@@ -48,14 +49,14 @@
         <div
           v-else
           class="text-xs font-medium text-stone-100"
-          :class="isExpanded ? 'whitespace-normal' : 'truncate'"
+          :class="expanded ? 'whitespace-normal' : 'truncate'"
         >
           {{ task.title }}
         </div>
       </div>
 
       <!-- Blocked reason (collapsed) -->
-      <div v-if="task.blocked_by && !isExpanded" class="blocked-reason-container hidden sm:block shrink-0 max-w-[200px]">
+      <div v-if="task.blocked_by && !expanded" class="blocked-reason-container hidden sm:block shrink-0 max-w-[200px]">
         <div class="blocked-reason-scroll">
           <span class="text-[10px] text-[#ff2d6f] font-medium whitespace-nowrap">
             {{ task.blocked_reason }}
@@ -76,9 +77,9 @@
     <!-- Drop indicator -->
     <div v-if="isDragOver" class="h-0.5 bg-blue-500 mx-4" />
 
-    <!-- Expanded Detail -->
+    <!-- Expanded Detail (controlled by parent) -->
     <TaskDetail
-      v-if="isExpanded"
+      v-if="expanded"
       :task="task"
       @unblock="$emit('unblock', task.id, $event)"
       @update="$emit('update', task.id, $event)"
@@ -86,11 +87,14 @@
     />
 
     <!-- Children (recursive) -->
-    <div v-if="isExpanded && task.children && task.children.length > 0" class="border-l border-stone-700/30 ml-3">
+    <div v-if="expanded && task.children && task.children.length > 0" class="border-l border-stone-700/30 ml-3">
       <TaskRow
         v-for="child in task.children"
         :key="child.id"
         :task="child"
+        :expanded="expandedId === child.id"
+        :expanded-id="expandedId"
+        @toggle-expand="(id: string) => $emit('toggle-expand', id)"
         @unblock="(id: string, resp: string) => $emit('unblock', id, resp)"
         @update="(id: string, upd: Partial<Task>) => $emit('update', id, upd)"
         @archive="(id: string) => $emit('archive', id)"
@@ -108,18 +112,23 @@ import TaskDetail from './TaskDetail.vue';
 const props = withDefaults(defineProps<{
   task: Task;
   focused?: boolean;
+  expanded?: boolean;
+  expandedId?: string | null;
 }>(), {
   focused: false,
+  expanded: false,
+  expandedId: null,
 });
 
 const emit = defineEmits<{
+  'toggle-expand': [id: string];
   unblock: [id: string, response: string];
   update: [id: string, updates: Partial<Task>];
   archive: [id: string];
   reorder: [id: string, sortOrder: number];
 }>();
 
-const isExpanded = ref(false);
+const rowEl = ref<HTMLElement | null>(null);
 const isDragOver = ref(false);
 
 // ── Inline title editing via long-press ─────────────────────────────
@@ -228,10 +237,13 @@ function onDrop(e: DragEvent) {
 
 function onRowClick() {
   if (!isDragging && !didLongPress && !editingTitle.value) {
-    isExpanded.value = !isExpanded.value;
+    emit('toggle-expand', props.task.id);
   }
   didLongPress = false;
 }
+
+// Expose element for parent scrolling
+defineExpose({ rowEl });
 </script>
 
 <style scoped>

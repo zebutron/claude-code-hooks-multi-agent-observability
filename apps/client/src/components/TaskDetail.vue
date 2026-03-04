@@ -1,20 +1,20 @@
 <template>
-  <div class="px-4 py-3 border-t border-stone-700/30 bg-stone-950/50 space-y-3">
+  <div class="px-4 py-3 border-t border-stone-700/30 bg-stone-950/50 space-y-3" @click.stop>
 
-    <!-- 1. Scores: IMPACT / TIME / COST / RISK / FIT — all 0-9, click-to-edit -->
-    <div class="flex flex-wrap gap-2 sm:gap-3 text-xs">
-      <ScoreChip label="IMPACT" :value="task.roi_score" @click="cycleScore('roi_score')" />
-      <ScoreChip label="TIME" :value="task.time_score" @click="cycleScore('time_score')" />
-      <ScoreChip label="COST" :value="task.cost_score" @click="cycleScore('cost_score')" />
-      <ScoreChip label="RISK" :value="task.risk_score" @click="cycleScore('risk_score')" />
-      <ScoreChip label="FIT" :value="task.fit_score" @click="cycleScore('fit_score')" />
+    <!-- 1. Scores: IMPACT / FIT (good) then TIME / COST / RISK (bad) — all 0-9, dropdown picker -->
+    <div class="flex flex-wrap gap-2 sm:gap-3 text-xs items-center">
+      <ScoreChip label="IMPACT" :value="task.roi_score" :high-is-good="true" @select="v => emitUpdate({ roi_score: v })" />
+      <ScoreChip label="FIT" :value="task.fit_score" :high-is-good="true" @select="v => emitUpdate({ fit_score: v })" />
+      <ScoreChip label="TIME" :value="task.time_score" :high-is-good="false" @select="v => emitUpdate({ time_score: v })" />
+      <ScoreChip label="COST" :value="task.cost_score" :high-is-good="false" @select="v => emitUpdate({ cost_score: v })" />
+      <ScoreChip label="RISK" :value="task.risk_score" :high-is-good="false" @select="v => emitUpdate({ risk_score: v })" />
 
       <!-- Quick status actions (right side) -->
       <div class="flex-1" />
       <div class="flex gap-1.5">
         <button
           v-if="task.status !== 'active' && task.status !== 'blocked' && task.status !== 'complete'"
-          @click="$emit('update', { status: 'active' })"
+          @click.stop="emitUpdate({ status: 'active' })"
           class="detail-action-btn"
           title="Start working on this"
         >
@@ -22,7 +22,7 @@
         </button>
         <button
           v-if="task.status === 'active'"
-          @click="$emit('update', { status: 'complete' })"
+          @click.stop="emitUpdate({ status: 'complete' })"
           class="detail-action-btn"
           title="Mark as complete"
         >
@@ -30,7 +30,7 @@
         </button>
         <button
           v-if="task.status !== 'blocked' && task.status !== 'complete'"
-          @click="setBlocked"
+          @click.stop="setBlocked"
           class="detail-action-btn"
           title="Mark as blocked"
         >
@@ -39,17 +39,17 @@
       </div>
     </div>
 
-    <!-- 2. Priority (dropdown) + Tags (click to edit) -->
-    <div class="flex items-center gap-3 flex-wrap">
+    <!-- 2. Priority (dropdown) + Tags (click to edit, scale at narrow widths) -->
+    <div class="flex items-center gap-2 min-w-0">
       <!-- Priority dropdown -->
-      <div class="relative" ref="priorityDropdownRef">
+      <div class="relative shrink-0" ref="priorityDropdownRef">
         <button
-          @click="showPriorityDropdown = !showPriorityDropdown"
+          @click.stop="showPriorityDropdown = !showPriorityDropdown"
           class="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors hover:bg-stone-800/60"
           :class="priorityColor(task.priority)"
         >
           {{ task.priority }}
-          <span class="text-[8px] text-stone-500">▼</span>
+          <span class="text-[14px] text-stone-500 leading-none">▼</span>
         </button>
         <div
           v-if="showPriorityDropdown"
@@ -58,15 +58,15 @@
           <button
             v-for="p in ['P0','P1','P2','P3']"
             :key="p"
-            @click="selectPriority(p)"
+            @click.stop="selectPriority(p)"
             class="block w-full text-left px-3 py-1 text-[10px] font-bold hover:bg-stone-700 transition-colors"
             :class="priorityColor(p)"
           >{{ p }}</button>
         </div>
       </div>
 
-      <!-- Tags (click to edit) -->
-      <div class="flex items-center gap-1 flex-1 min-w-0">
+      <!-- Tags (click to edit, scale to fit) -->
+      <div class="flex items-center gap-1 min-w-0 overflow-hidden flex-1">
         <div v-if="editingTags" class="flex-1 flex gap-1.5" @click.stop>
           <input
             ref="tagsInput"
@@ -81,16 +81,16 @@
         </div>
         <div
           v-else
-          @click="startEditTags"
-          class="flex gap-1 items-center cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors min-w-0"
+          @click.stop="startEditTags"
+          class="flex gap-1 items-center cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors min-w-0 overflow-hidden"
         >
           <span
             v-if="task.tags && task.tags.length"
             v-for="tag in task.tags"
             :key="tag"
-            class="text-[9px] font-medium px-1.5 py-0.5 rounded bg-stone-700/60 text-stone-400"
+            class="text-[9px] font-medium px-1.5 py-0.5 rounded bg-stone-700/60 text-stone-400 shrink-0 max-w-[80px] truncate"
           >{{ tag }}</span>
-          <span v-else class="text-[9px] text-stone-600 italic">+ tags</span>
+          <span v-else class="text-[9px] text-stone-600 italic shrink-0">+ tags</span>
         </div>
       </div>
     </div>
@@ -114,13 +114,13 @@
       <div class="text-xs text-stone-300 mb-2">AI-proposed — needs your prioritization</div>
       <div class="flex gap-2">
         <button
-          @click="$emit('update', { status: 'queued' })"
+          @click.stop="emitUpdate({ status: 'queued' })"
           class="px-3 py-1.5 text-xs font-medium rounded bg-purple-600 hover:bg-purple-500 text-white transition-colors"
         >
           Approve &amp; Queue
         </button>
         <button
-          @click="$emit('archive')"
+          @click.stop="$emit('archive')"
           class="px-3 py-1.5 text-xs font-medium rounded bg-stone-700 hover:bg-stone-600 text-stone-200 transition-colors"
         >
           Dismiss
@@ -133,13 +133,13 @@
       <div class="text-xs text-stone-300 mb-2">Completed — review and clear</div>
       <div class="flex gap-2">
         <button
-          @click="$emit('archive')"
+          @click.stop="$emit('archive')"
           class="px-3 py-1.5 text-xs font-medium rounded bg-green-600 hover:bg-green-500 text-white transition-colors"
         >
           Reviewed &amp; Archive
         </button>
         <button
-          @click="$emit('update', { status: 'active' })"
+          @click.stop="emitUpdate({ status: 'active' })"
           class="px-3 py-1.5 text-xs font-medium rounded bg-stone-700 hover:bg-stone-600 text-stone-200 transition-colors"
         >
           Reopen
@@ -148,9 +148,9 @@
     </div>
 
     <!-- 4. Goal (rationale) — click to edit -->
-    <div>
+    <div @click.stop>
       <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Goal</span>
-      <div v-if="editingRationale" class="mt-1" @click.stop>
+      <div v-if="editingRationale" class="mt-1">
         <textarea
           ref="rationaleInput"
           v-model="editRationaleValue"
@@ -163,7 +163,7 @@
       </div>
       <div
         v-else
-        @click="startEditRationale"
+        @click.stop="startEditRationale"
         class="text-xs italic cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors mt-0.5"
         :class="task.rationale ? 'text-stone-300' : 'text-stone-600'"
       >
@@ -172,9 +172,9 @@
     </div>
 
     <!-- 5. Context (description) — click to edit -->
-    <div>
+    <div @click.stop>
       <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Context</span>
-      <div v-if="editingDescription" class="mt-1" @click.stop>
+      <div v-if="editingDescription" class="mt-1">
         <textarea
           ref="descriptionInput"
           v-model="editDescriptionValue"
@@ -187,7 +187,7 @@
       </div>
       <div
         v-else
-        @click="startEditDescription"
+        @click.stop="startEditDescription"
         class="text-xs cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors mt-0.5"
         :class="task.description ? 'text-stone-300' : 'text-stone-600'"
       >
@@ -196,9 +196,9 @@
     </div>
 
     <!-- 6. Reqs (requirements) — click to edit -->
-    <div>
+    <div @click.stop>
       <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Reqs</span>
-      <div v-if="editingRequirements" class="mt-1" @click.stop>
+      <div v-if="editingRequirements" class="mt-1">
         <textarea
           ref="requirementsInput"
           v-model="editRequirementsValue"
@@ -211,7 +211,7 @@
       </div>
       <div
         v-else
-        @click="startEditRequirements"
+        @click.stop="startEditRequirements"
         class="text-xs cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors mt-0.5"
         :class="task.requirements ? 'text-stone-300' : 'text-stone-600'"
       >
@@ -219,59 +219,63 @@
       </div>
     </div>
 
-    <!-- 7. Agent delegation — SPAWN -->
-    <div class="bg-stone-900/60 border border-stone-700/40 rounded-lg p-3 space-y-2">
-      <div class="flex items-center justify-between">
-        <div class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Agent</div>
+    <!-- 7. AGENT — collapsible section -->
+    <div class="bg-stone-900/60 border border-stone-700/40 rounded-lg overflow-hidden">
+      <!-- AGENT header bar (always visible, click to expand) -->
+      <div
+        @click.stop="agentExpanded = !agentExpanded"
+        class="flex items-center justify-center gap-2 px-3 py-2 cursor-pointer hover:bg-stone-800/40 transition-colors"
+      >
         <!-- Running agent indicator -->
-        <div v-if="runningAgent" class="flex items-center gap-1.5">
-          <span class="w-1.5 h-1.5 rounded-full bg-[#39ff14] animate-pulse" />
-          <span class="text-[10px] text-stone-400">PID {{ runningAgent.pid }}</span>
-        </div>
+        <span v-if="runningAgent" class="w-1.5 h-1.5 rounded-full bg-[#39ff14] animate-pulse" />
+        <span class="text-[11px] font-bold text-stone-300 uppercase tracking-widest">AGENT</span>
+        <span class="text-[14px] text-stone-500 leading-none transition-transform" :class="agentExpanded ? 'rotate-180' : ''">▼</span>
+        <span v-if="runningAgent" class="text-[10px] text-stone-500 ml-1">PID {{ runningAgent.pid }}</span>
       </div>
 
-      <!-- Agent currently running -->
-      <div v-if="runningAgent" class="space-y-2">
-        <div class="text-xs text-stone-300">
-          Running in <span class="font-mono text-stone-400">{{ runningAgent.project_dir.split('/').slice(-2).join('/') }}</span>
-          <span v-if="runningAgent.model" class="text-stone-500"> · {{ runningAgent.model }}</span>
+      <!-- AGENT expanded content -->
+      <div v-if="agentExpanded" class="px-3 pb-3 space-y-2 border-t border-stone-700/30">
+        <!-- Agent currently running -->
+        <div v-if="runningAgent" class="space-y-2 pt-2">
+          <div class="text-xs text-stone-300">
+            Running in <span class="font-mono text-stone-400">{{ runningAgent.project_dir.split('/').slice(-2).join('/') }}</span>
+            <span v-if="runningAgent.model" class="text-stone-500"> · {{ runningAgent.model }}</span>
+          </div>
+          <div v-if="task.last_agent_activity" class="text-[10px] text-stone-500">
+            Last active {{ timeAgo(task.last_agent_activity) }}
+          </div>
+          <!-- Output tail (last few lines) -->
+          <div v-if="runningAgent.output_tail.length" class="max-h-24 overflow-y-auto rounded bg-black/30 p-2">
+            <div
+              v-for="(line, i) in runningAgent.output_tail.slice(-8)"
+              :key="i"
+              class="text-[10px] font-mono text-stone-400 leading-tight"
+            >{{ line }}</div>
+          </div>
+          <button
+            @click.stop="handleStopAgent"
+            :disabled="stoppingAgent"
+            class="px-3 py-1.5 text-xs font-medium rounded bg-red-950/60 border border-red-500/30 text-red-400 hover:bg-red-950 hover:border-red-500/50 transition-colors disabled:opacity-50"
+          >
+            {{ stoppingAgent ? 'Stopping...' : 'Stop Agent' }}
+          </button>
         </div>
-        <div v-if="task.last_agent_activity" class="text-[10px] text-stone-500">
-          Last active {{ timeAgo(task.last_agent_activity) }}
-        </div>
-        <!-- Output tail (last few lines) -->
-        <div v-if="runningAgent.output_tail.length" class="max-h-24 overflow-y-auto rounded bg-black/30 p-2">
-          <div
-            v-for="(line, i) in runningAgent.output_tail.slice(-8)"
-            :key="i"
-            class="text-[10px] font-mono text-stone-400 leading-tight"
-          >{{ line }}</div>
-        </div>
-        <button
-          @click="handleStopAgent"
-          :disabled="stoppingAgent"
-          class="px-3 py-1.5 text-xs font-medium rounded bg-red-950/60 border border-red-500/30 text-red-400 hover:bg-red-950 hover:border-red-500/50 transition-colors disabled:opacity-50"
-        >
-          {{ stoppingAgent ? 'Stopping...' : 'Stop Agent' }}
-        </button>
-      </div>
 
-      <!-- No agent running — show SPAWN button -->
-      <div v-else-if="task.status !== 'complete' && task.status !== 'archived'">
-        <div v-if="task.agent_session_id" class="text-[10px] text-stone-500 mb-1.5">
-          Previous: <span class="font-mono">{{ task.agent_session_id.slice(0, 12) }}...</span>
-          <span v-if="task.last_agent_activity"> · {{ timeAgo(task.last_agent_activity) }}</span>
-        </div>
-        <!-- SPAWN form -->
-        <div v-if="showAssignForm" class="space-y-2">
+        <!-- No agent running — show SPAWN form -->
+        <div v-else-if="task.status !== 'complete' && task.status !== 'archived'" class="pt-2 space-y-2">
+          <div v-if="task.agent_session_id" class="text-[10px] text-stone-500">
+            Previous: <span class="font-mono">{{ task.agent_session_id.slice(0, 12) }}...</span>
+            <span v-if="task.last_agent_activity"> · {{ timeAgo(task.last_agent_activity) }}</span>
+          </div>
           <input
             v-model="assignProjectDir"
             type="text"
             placeholder="Project dir (default: personal-os)"
             class="w-full px-2 py-1 text-xs rounded bg-stone-950 border border-stone-700/50 text-stone-300 placeholder-stone-600 focus:outline-none focus:border-stone-500"
+            @click.stop
           />
           <div class="flex gap-2">
-            <select v-model="assignModel" class="px-2 py-1 text-[10px] rounded bg-stone-950 border border-stone-700/50 text-stone-300">
+            <select v-model="assignModel" @click.stop class="px-2 py-1 text-[10px] rounded bg-stone-950 border border-stone-700/50 text-stone-300">
               <option value="">Default model</option>
               <option value="sonnet">Sonnet</option>
               <option value="opus">Opus</option>
@@ -284,6 +288,7 @@
               min="1"
               max="100"
               class="w-20 px-2 py-1 text-[10px] rounded bg-stone-950 border border-stone-700/50 text-stone-300 placeholder-stone-600 focus:outline-none"
+              @click.stop
             />
           </div>
           <textarea
@@ -291,48 +296,36 @@
             placeholder="Scope description (optional — what dirs/resources are in scope)"
             class="w-full px-2 py-1 text-xs rounded bg-stone-950 border border-stone-700/50 text-stone-300 placeholder-stone-600 focus:outline-none focus:border-stone-500 resize-none"
             rows="2"
+            @click.stop
           />
           <textarea
             v-model="assignInstructions"
             placeholder="Additional instructions for the agent..."
             class="w-full px-2 py-1 text-xs rounded bg-stone-950 border border-stone-700/50 text-stone-300 placeholder-stone-600 focus:outline-none focus:border-stone-500 resize-none"
             rows="2"
+            @click.stop
           />
           <div class="flex gap-2">
             <button
-              @click="handleAssign"
+              @click.stop="handleAssign"
               :disabled="assigningAgent"
               class="px-4 py-1.5 text-xs font-bold rounded bg-emerald-600 hover:bg-emerald-500 text-white transition-colors disabled:opacity-50 uppercase tracking-wider"
             >
               {{ assigningAgent ? 'Spawning...' : '⚡ SPAWN' }}
             </button>
-            <button
-              @click="showAssignForm = false"
-              class="px-3 py-1.5 text-xs font-medium rounded bg-stone-700 hover:bg-stone-600 text-stone-200 transition-colors"
-            >
-              Cancel
-            </button>
           </div>
           <div v-if="assignError" class="text-[10px] text-red-400">{{ assignError }}</div>
         </div>
-        <!-- Simple SPAWN button -->
-        <button
-          v-else
-          @click="showAssignForm = true"
-          class="px-4 py-1.5 text-xs font-bold rounded bg-stone-800 border border-stone-700/50 text-stone-300 hover:bg-stone-700 hover:text-stone-100 transition-colors uppercase tracking-wider"
-        >
-          ⚡ SPAWN
-        </button>
-      </div>
 
-      <!-- Completed/archived — just show history -->
-      <div v-else-if="task.agent_session_id" class="text-xs text-stone-500">
-        Completed by <span class="font-mono text-stone-400">{{ task.agent_session_id.slice(0, 12) }}...</span>
+        <!-- Completed/archived — just show history -->
+        <div v-else-if="task.agent_session_id" class="text-xs text-stone-500 pt-2">
+          Completed by <span class="font-mono text-stone-400">{{ task.agent_session_id.slice(0, 12) }}...</span>
+        </div>
+        <div v-else class="text-xs text-stone-600 italic pt-2">No agent assigned</div>
       </div>
-      <div v-else class="text-xs text-stone-600 italic">No agent assigned</div>
     </div>
 
-    <!-- Activity log (notes) -->
+    <!-- Activity log (notes) — reverse chronological -->
     <div v-if="task.notes" class="rounded-lg overflow-hidden">
       <div class="text-[9px] font-bold text-stone-600 uppercase tracking-wider mb-1">Activity</div>
       <div class="space-y-1 max-h-32 overflow-y-auto">
@@ -347,18 +340,18 @@
       </div>
     </div>
 
-    <!-- Add note -->
-    <div class="flex gap-2">
+    <!-- Add note (does NOT close item on submit) -->
+    <div class="flex gap-2" @click.stop>
       <input
         v-model="newNote"
         type="text"
         placeholder="Add a note..."
         class="flex-1 px-2 py-1 text-xs rounded bg-stone-900 border border-stone-700/50 text-stone-300 placeholder-stone-600 focus:outline-none focus:border-stone-500"
-        @keydown.enter="addNote"
+        @keydown.enter.stop="addNote"
       />
       <button
         v-if="newNote.trim()"
-        @click="addNote"
+        @click.stop="addNote"
         class="px-2 py-1 text-[10px] font-medium rounded bg-stone-700 hover:bg-stone-600 text-stone-200 transition-colors"
       >
         Add
@@ -392,11 +385,16 @@ const emit = defineEmits<{
   archive: [];
 }>();
 
+// Wrapper to emit update without bubbling causing collapse
+function emitUpdate(updates: Partial<Task>) {
+  emit('update', updates);
+}
+
 // ── Agent delegation ─────────────────────────────────────────────────
 
 const { assignAgent, stopAgent: stopAgentFn, getAgentForTask } = useAgents();
 
-const showAssignForm = ref(false);
+const agentExpanded = ref(false);
 const assignProjectDir = ref('');
 const assignModel = ref('');
 const assignMaxTurns = ref<number | undefined>(undefined);
@@ -421,7 +419,6 @@ async function handleAssign() {
       scope_description: assignScope.value.trim() || undefined,
       additional_instructions: assignInstructions.value.trim() || undefined,
     });
-    showAssignForm.value = false;
     assignProjectDir.value = '';
     assignModel.value = '';
     assignMaxTurns.value = undefined;
@@ -455,7 +452,7 @@ const priorityDropdownRef = ref<HTMLElement | null>(null);
 function selectPriority(p: string) {
   showPriorityDropdown.value = false;
   if (p !== props.task.priority) {
-    emit('update', { priority: p } as any);
+    emitUpdate({ priority: p } as any);
   }
 }
 
@@ -497,7 +494,7 @@ function saveTags() {
   const newTags = editTagsValue.value.split(',').map(t => t.trim()).filter(t => t.length > 0);
   const oldTags = (props.task.tags || []).join(',');
   if (newTags.join(',') !== oldTags) {
-    emit('update', { tags: newTags } as any);
+    emitUpdate({ tags: newTags } as any);
   }
 }
 
@@ -518,7 +515,7 @@ function saveRationale() {
   editingRationale.value = false;
   const val = editRationaleValue.value.trim();
   if (val !== (props.task.rationale || '')) {
-    emit('update', { rationale: val || undefined } as any);
+    emitUpdate({ rationale: val || undefined } as any);
   }
 }
 
@@ -539,7 +536,7 @@ function saveDescription() {
   editingDescription.value = false;
   const val = editDescriptionValue.value.trim();
   if (val !== (props.task.description || '')) {
-    emit('update', { description: val || undefined } as any);
+    emitUpdate({ description: val || undefined } as any);
   }
 }
 
@@ -560,16 +557,8 @@ function saveRequirements() {
   editingRequirements.value = false;
   const val = editRequirementsValue.value.trim();
   if (val !== (props.task.requirements || '')) {
-    emit('update', { requirements: val || undefined } as any);
+    emitUpdate({ requirements: val || undefined } as any);
   }
-}
-
-// ── Score cycling (0-9 loop) ─────────────────────────────────────────
-
-function cycleScore(field: string) {
-  const current = (props.task as any)[field] ?? 0;
-  const next = current >= 9 ? 0 : current + 1;
-  emit('update', { [field]: next } as any);
 }
 
 // ── Quick block ──────────────────────────────────────────────────────
@@ -577,7 +566,7 @@ function cycleScore(field: string) {
 function setBlocked() {
   const reason = prompt('What is blocking this task?');
   if (reason) {
-    emit('update', {
+    emitUpdate({
       status: 'blocked',
       blocked_by: 'human_input',
       blocked_reason: reason,
@@ -585,7 +574,7 @@ function setBlocked() {
   }
 }
 
-// ── Add note ─────────────────────────────────────────────────────────
+// ── Add note (does NOT close item) ──────────────────────────────────
 
 const newNote = ref('');
 
@@ -594,14 +583,15 @@ function addNote() {
   if (!text) return;
   const timestamp = new Date().toISOString();
   const noteEntry = `[${timestamp}] ${text}`;
+  // Prepend new note (reverse chronological)
   const updatedNotes = props.task.notes
-    ? props.task.notes + '\n' + noteEntry
+    ? noteEntry + '\n' + props.task.notes
     : noteEntry;
-  emit('update', { notes: updatedNotes });
+  emitUpdate({ notes: updatedNotes });
   newNote.value = '';
 }
 
-// ── Notes parsing ────────────────────────────────────────────────────
+// ── Notes parsing (already in reverse chronological from prepend) ────
 
 const parsedNotes = computed(() => {
   if (!props.task.notes) return [];

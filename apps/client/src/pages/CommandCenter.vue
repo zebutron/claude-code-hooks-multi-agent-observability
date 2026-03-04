@@ -166,7 +166,10 @@
         :key="task.id"
         :task="task"
         :focused="idx === focusedIndex"
+        :expanded="expandedTaskId === task.id"
+        :expanded-id="expandedTaskId"
         :ref="(el: any) => { if (el) taskRowRefs[idx] = el.$el || el; }"
+        @toggle-expand="handleToggleExpand"
         @unblock="handleUnblock"
         @update="handleUpdate"
         @archive="handleArchive"
@@ -853,6 +856,27 @@ async function handleStopAgent(pid: number) {
     await stopAgentFn(pid);
   } catch (e: any) {
     console.error('Failed to stop agent:', e);
+  }
+}
+
+// ── Expand state (single expanded item, auto-scroll) ─────────────────
+
+const expandedTaskId = ref<string | null>(null);
+
+function handleToggleExpand(id: string) {
+  if (expandedTaskId.value === id) {
+    // Collapsing — just collapse in place
+    expandedTaskId.value = null;
+  } else {
+    // Expanding — close previous, open new, scroll to top of list area
+    expandedTaskId.value = id;
+    nextTick(() => {
+      const idx = filteredTasks.value.findIndex(t => t.id === id);
+      const el = taskRowRefs[idx];
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
   }
 }
 
