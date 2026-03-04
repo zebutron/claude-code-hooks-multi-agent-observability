@@ -24,7 +24,8 @@ export function useHITLNotifications() {
     });
 
     notification.onclick = () => {
-      window.focus();
+      // Only focus if user explicitly clicks the notification
+      // Don't use window.focus() — it steals focus from other apps (e.g. terminal)
       notification.close();
     };
   };

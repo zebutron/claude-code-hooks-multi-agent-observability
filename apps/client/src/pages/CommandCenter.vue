@@ -21,7 +21,7 @@
             ? 'text-stone-100 border-stone-100'
             : 'text-stone-500 border-transparent hover:text-stone-300'"
         >
-          Priority Stack
+          Stack
         </button>
         <button
           @click="activeTab = 'digest'"
@@ -30,7 +30,7 @@
             ? 'text-stone-100 border-stone-100'
             : 'text-stone-500 border-transparent hover:text-stone-300'"
         >
-          Daily Digest
+          Report
         </button>
         <button
           @click="activeTab = 'output'"
@@ -39,7 +39,7 @@
             ? 'text-stone-100 border-stone-100'
             : 'text-stone-500 border-transparent hover:text-stone-300'"
         >
-          Output
+          Log
         </button>
       </div>
 
@@ -69,8 +69,21 @@
           {{ f.label }} <span class="font-mono ml-1 opacity-70">{{ f.count }}</span>
         </button>
 
-        <!-- Tag filter -->
-        <div v-if="allTags.length" class="sm:ml-2 sm:pl-2 sm:border-l sm:border-stone-700/50 flex items-center gap-1.5 flex-wrap basis-full sm:basis-auto mt-1.5 sm:mt-0">
+        <!-- Tag filter toggle -->
+        <button
+          v-if="allTags.length"
+          @click="showTagFilters = !showTagFilters"
+          class="ml-auto text-[10px] px-1.5 py-0.5 rounded transition-colors"
+          :class="showTagFilters || activeTagFilters.size > 0
+            ? 'text-stone-300 hover:text-stone-100'
+            : 'text-stone-600 hover:text-stone-400'"
+        >
+          {{ showTagFilters ? '▾ tags' : '▸ tags' }}
+          <span v-if="activeTagFilters.size > 0" class="ml-0.5 text-[#ffee00]">{{ activeTagFilters.size }}</span>
+        </button>
+      </div>
+      <!-- Tag filter chips (collapsible, hidden by default) -->
+      <div v-if="activeTab === 'prio' && showTagFilters && allTags.length" class="px-4 pb-2 flex items-center gap-1.5 flex-wrap">
           <button
             v-for="tag in allTags"
             :key="tag"
@@ -87,7 +100,6 @@
           >
             clear
           </button>
-        </div>
       </div>
     </header>
 
@@ -292,15 +304,7 @@
           </div>
           <!-- Rendered markdown content -->
           <div
-            class="px-4 py-3 prose prose-invert prose-sm max-w-none
-              prose-headings:text-stone-200 prose-headings:font-semibold prose-headings:mt-3 prose-headings:mb-1.5
-              prose-h1:text-base prose-h2:text-sm prose-h3:text-xs
-              prose-p:text-stone-400 prose-p:text-xs prose-p:leading-relaxed prose-p:my-1
-              prose-li:text-stone-400 prose-li:text-xs prose-li:my-0
-              prose-strong:text-stone-200
-              prose-code:text-[#c084fc] prose-code:text-[11px] prose-code:bg-stone-800/50 prose-code:px-1 prose-code:rounded
-              prose-blockquote:border-stone-700 prose-blockquote:text-stone-500 prose-blockquote:text-xs
-              prose-a:text-[#00e5ff] prose-a:no-underline hover:prose-a:underline"
+            class="px-4 py-3 text-stone-300 text-xs leading-relaxed max-w-none heartbeat-content"
             v-html="renderMarkdown(output.content)"
           />
         </div>
@@ -455,6 +459,7 @@ function renderMarkdown(md: string): string {
 
 const activeFilter = ref<TaskStatus | null>(null);
 const activeTagFilters = reactive(new Set<string>());
+const showTagFilters = ref(false);
 
 const allTags = computed(() => {
   const tagSet = new Set<string>();
@@ -696,5 +701,50 @@ onUnmounted(() => {
 }
 .filter-chip--active {
   @apply bg-stone-700 text-stone-100 border-stone-500/50;
+}
+
+/* Heartbeat markdown content */
+.heartbeat-content :deep(h1),
+.heartbeat-content :deep(h2),
+.heartbeat-content :deep(h3) {
+  color: white;
+  font-weight: 600;
+  margin-top: 0.75rem;
+  margin-bottom: 0.375rem;
+}
+.heartbeat-content :deep(h1) { font-size: 1rem; }
+.heartbeat-content :deep(h2) { font-size: 0.875rem; }
+.heartbeat-content :deep(h3) { font-size: 0.75rem; }
+.heartbeat-content :deep(strong) { color: white; }
+.heartbeat-content :deep(code) {
+  color: #c084fc;
+  font-size: 11px;
+  background: rgba(41, 37, 36, 0.5);
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+}
+.heartbeat-content :deep(blockquote) {
+  border-left: 2px solid #57534e;
+  padding-left: 0.75rem;
+  color: #a8a29e;
+  font-size: 0.75rem;
+}
+.heartbeat-content :deep(a) {
+  color: #00e5ff;
+  text-decoration: none;
+}
+.heartbeat-content :deep(a:hover) {
+  text-decoration: underline;
+}
+.heartbeat-content :deep(ul) {
+  padding-left: 1.25rem;
+  list-style-type: disc;
+}
+.heartbeat-content :deep(li) {
+  margin: 0.125rem 0;
+}
+.heartbeat-content :deep(hr) {
+  border-color: #44403c;
+  margin: 0.75rem 0;
 }
 </style>
