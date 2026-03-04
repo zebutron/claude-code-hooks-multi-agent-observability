@@ -197,6 +197,20 @@ export function initDatabase(): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON task_audit_log(timestamp)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_audit_changed_by ON task_audit_log(changed_by)');
 
+  // Migration: add task_snapshot and edit_batch_id columns if missing
+  // (must run BEFORE creating idx_audit_batch which references edit_batch_id)
+  try {
+    const auditCols = db.prepare("PRAGMA table_info(task_audit_log)").all() as any[];
+    if (!auditCols.some((c: any) => c.name === 'task_snapshot')) {
+      db.exec("ALTER TABLE task_audit_log ADD COLUMN task_snapshot TEXT");
+    }
+    if (!auditCols.some((c: any) => c.name === 'edit_batch_id')) {
+      db.exec("ALTER TABLE task_audit_log ADD COLUMN edit_batch_id TEXT");
+    }
+  } catch { /* table may not exist yet */ }
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_audit_batch ON task_audit_log(edit_batch_id)');
+
   // ── Command Center: Usage log table ──────────────────────────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS usage_log (

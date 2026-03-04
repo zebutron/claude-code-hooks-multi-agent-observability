@@ -25,6 +25,7 @@ import {
   getTaskHistory,
   getRecentEdits,
   getAlignmentDiffs,
+  getAlignmentReport,
   type TaskCreate,
   type TaskUpdate,
 } from './tasks';
@@ -673,6 +674,17 @@ const server = Bun.serve({
       const limit = parseInt(url.searchParams.get('limit') || '100');
       const diffs = getAlignmentDiffs(limit);
       return new Response(JSON.stringify(diffs), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // GET /audit/alignment-report - Full alignment report for agent consumption
+    // Groups corrections by edit batch, includes task context snapshots,
+    // and provides summary stats so an alignment agent can identify patterns.
+    if (url.pathname === '/audit/alignment-report' && req.method === 'GET') {
+      const limit = parseInt(url.searchParams.get('limit') || '200');
+      const report = getAlignmentReport(limit);
+      return new Response(JSON.stringify(report), {
         headers: { ...headers, 'Content-Type': 'application/json' }
       });
     }

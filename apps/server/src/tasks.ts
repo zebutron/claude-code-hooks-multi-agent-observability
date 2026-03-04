@@ -91,6 +91,34 @@ function generateId(): string {
   return crypto.randomUUID();
 }
 
+/** Build a JSON snapshot of a task's key fields for audit context.
+ *  This makes each audit entry self-contained — an alignment agent can
+ *  understand what the task was about without any extra lookups. */
+function buildTaskSnapshot(task: Task): string {
+  let parentTitle: string | null = null;
+  if (task.parent_id) {
+    const parentStmt = db.prepare('SELECT title FROM tasks WHERE id = ?');
+    const parentRow = parentStmt.get(task.parent_id) as any;
+    parentTitle = parentRow?.title ?? null;
+  }
+
+  return JSON.stringify({
+    title: task.title,
+    description: task.description,
+    rationale: task.rationale,
+    requirements: task.requirements,
+    priority: task.priority,
+    status: task.status,
+    tags: task.tags,
+    parent_id: task.parent_id,
+    parent_title: parentTitle,
+    roi_score: task.roi_score,
+    risk_score: task.risk_score,
+    fit_score: task.fit_score,
+    source: task.source,
+  });
+}
+
 function rowToTask(row: any): Task {
   return {
     id: row.id,
@@ -211,12 +239,14 @@ export function createTask(input: TaskCreate): Task {
     task.created_at, task.updated_at, task.completed_at
   );
 
-  // Audit log: record task creation
+  // Audit log: record task creation with full snapshot
+  const snapshot = buildTaskSnapshot(task);
   const auditStmt = db.prepare(`
-    INSERT INTO task_audit_log (task_id, field_name, old_value, new_value, changed_by, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO task_audit_log (task_id, field_name, old_value, new_value, changed_by, timestamp, task_snapshot, edit_batch_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  auditStmt.run(task.id, '_created', null, task.title, task.source, now);
+  const batchId = generateId();
+  auditStmt.run(task.id, '_created', null, task.title, task.source, now, snapshot, batchId);
 
   return task;
 }
@@ -332,10 +362,22 @@ export function updateTask(id: string, updates: TaskUpdate, changedBy: string = 
     notes: updates.notes,
   };
 
-  // ── Audit log: capture field-level diffs before writing ─────────────
+  // ── Audit log: capture field-level diffs with full context ──────────
+  //
+  // Each entry gets:
+  //   task_snapshot  — JSON of the task's state BEFORE this edit (so the
+  //                    alignment agent sees what the task looked like when
+  //                    the human decided to change it)
+  //   edit_batch_id  — shared UUID for all field changes from this single
+  //                    updateTask() call, so the agent knows "these 3 field
+  //                    changes were one coherent edit decision"
+  //
+  const snapshot = buildTaskSnapshot(existing);
+  const batchId = generateId();
+
   const auditStmt = db.prepare(`
-    INSERT INTO task_audit_log (task_id, field_name, old_value, new_value, changed_by, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO task_audit_log (task_id, field_name, old_value, new_value, changed_by, timestamp, task_snapshot, edit_batch_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   // Audit regular fields
@@ -345,7 +387,7 @@ export function updateTask(id: string, updates: TaskUpdate, changedBy: string = 
       const newVal = value;
       // Only log if the value actually changed
       if (String(oldVal ?? '') !== String(newVal ?? '')) {
-        auditStmt.run(id, key, String(oldVal ?? ''), String(newVal ?? ''), changedBy, now);
+        auditStmt.run(id, key, String(oldVal ?? ''), String(newVal ?? ''), changedBy, now, snapshot, batchId);
       }
     }
   }
@@ -355,7 +397,7 @@ export function updateTask(id: string, updates: TaskUpdate, changedBy: string = 
     const oldTags = JSON.stringify(existing.tags || []);
     const newTags = JSON.stringify((updates as any).tags || []);
     if (oldTags !== newTags) {
-      auditStmt.run(id, 'tags', oldTags, newTags, changedBy, now);
+      auditStmt.run(id, 'tags', oldTags, newTags, changedBy, now, snapshot, batchId);
     }
   }
 
@@ -398,6 +440,15 @@ export interface AuditEntry {
   new_value: string | null;
   changed_by: string;
   timestamp: number;
+  task_snapshot: any | null;     // parsed JSON — task state at time of edit
+  edit_batch_id: string | null;  // groups field changes from one updateTask() call
+}
+
+function rowToAudit(row: any): AuditEntry {
+  return {
+    ...row,
+    task_snapshot: row.task_snapshot ? JSON.parse(row.task_snapshot) : null,
+  };
 }
 
 export function getTaskHistory(taskId: string, limit: number = 100): AuditEntry[] {
@@ -407,7 +458,7 @@ export function getTaskHistory(taskId: string, limit: number = 100): AuditEntry[
     ORDER BY timestamp DESC
     LIMIT ?
   `);
-  return stmt.all(taskId, limit) as AuditEntry[];
+  return (stmt.all(taskId, limit) as any[]).map(rowToAudit);
 }
 
 export function getRecentEdits(limit: number = 50, changedBy?: string): AuditEntry[] {
@@ -418,24 +469,26 @@ export function getRecentEdits(limit: number = 50, changedBy?: string): AuditEnt
       ORDER BY timestamp DESC
       LIMIT ?
     `);
-    return stmt.all(changedBy, limit) as AuditEntry[];
+    return (stmt.all(changedBy, limit) as any[]).map(rowToAudit);
   }
   const stmt = db.prepare(`
     SELECT * FROM task_audit_log
     ORDER BY timestamp DESC
     LIMIT ?
   `);
-  return stmt.all(limit) as AuditEntry[];
+  return (stmt.all(limit) as any[]).map(rowToAudit);
 }
 
-export function getAlignmentDiffs(limit: number = 100): { task_id: string; field_name: string; agent_value: string | null; human_value: string | null; timestamp: number }[] {
+export function getAlignmentDiffs(limit: number = 100) {
   // Find fields where an agent set a value and then a human changed it
   // This is the key alignment signal: "what manager proposed" vs "what Zeb edited"
   const stmt = db.prepare(`
     SELECT h.task_id, h.field_name,
            h.old_value as agent_value,
            h.new_value as human_value,
-           h.timestamp
+           h.timestamp,
+           h.task_snapshot,
+           h.edit_batch_id
     FROM task_audit_log h
     WHERE h.changed_by = 'human'
       AND EXISTS (
@@ -448,7 +501,86 @@ export function getAlignmentDiffs(limit: number = 100): { task_id: string; field
     ORDER BY h.timestamp DESC
     LIMIT ?
   `);
-  return stmt.all(limit) as any[];
+  return (stmt.all(limit) as any[]).map(row => ({
+    ...row,
+    task_snapshot: row.task_snapshot ? JSON.parse(row.task_snapshot) : null,
+  }));
+}
+
+/** Full alignment report designed for agent consumption.
+ *  Groups human corrections by edit batch, includes full task context,
+ *  and provides the before-state so the agent can learn patterns like
+ *  "agent tends to under-prioritize infrastructure tasks." */
+export function getAlignmentReport(limit: number = 200) {
+  // Get all human edits that corrected agent-set values, with full context
+  const stmt = db.prepare(`
+    SELECT
+      h.id,
+      h.task_id,
+      h.field_name,
+      h.old_value as agent_value,
+      h.new_value as human_value,
+      h.timestamp as correction_timestamp,
+      h.task_snapshot,
+      h.edit_batch_id,
+      a.changed_by as original_agent,
+      a.timestamp as agent_timestamp
+    FROM task_audit_log h
+    INNER JOIN task_audit_log a
+      ON a.task_id = h.task_id
+      AND a.field_name = h.field_name
+      AND a.changed_by LIKE 'agent:%'
+      AND a.timestamp < h.timestamp
+      AND a.timestamp = (
+        SELECT MAX(a2.timestamp)
+        FROM task_audit_log a2
+        WHERE a2.task_id = h.task_id
+          AND a2.field_name = h.field_name
+          AND a2.changed_by LIKE 'agent:%'
+          AND a2.timestamp < h.timestamp
+      )
+    WHERE h.changed_by = 'human'
+    ORDER BY h.timestamp DESC
+    LIMIT ?
+  `);
+
+  const rows = stmt.all(limit) as any[];
+
+  // Group by edit_batch_id so the agent sees coherent corrections
+  const batches = new Map<string, any>();
+
+  for (const row of rows) {
+    const batchKey = row.edit_batch_id || `single_${row.id}`;
+    if (!batches.has(batchKey)) {
+      const snapshot = row.task_snapshot ? JSON.parse(row.task_snapshot) : null;
+      batches.set(batchKey, {
+        edit_batch_id: row.edit_batch_id,
+        task_id: row.task_id,
+        task_context: snapshot,
+        correction_timestamp: row.correction_timestamp,
+        time_to_correct_ms: row.correction_timestamp - row.agent_timestamp,
+        corrections: [],
+      });
+    }
+    batches.get(batchKey)!.corrections.push({
+      field: row.field_name,
+      agent_value: row.agent_value,
+      human_value: row.human_value,
+      original_agent: row.original_agent,
+      agent_set_at: row.agent_timestamp,
+    });
+  }
+
+  return {
+    generated_at: Date.now(),
+    total_corrections: rows.length,
+    edit_batches: Array.from(batches.values()),
+    // Summary stats for quick orientation
+    fields_corrected: rows.reduce((acc, r) => {
+      acc[r.field_name] = (acc[r.field_name] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>),
+  };
 }
 
 export function reorderTask(id: string, newSortOrder: number): Task | null {
