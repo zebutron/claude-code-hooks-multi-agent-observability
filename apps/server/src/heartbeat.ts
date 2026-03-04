@@ -5,12 +5,43 @@
  * Manages pulse triggering and in-process scheduling (no launchd dependency)
  */
 
-import { readdir, readFile } from 'fs/promises';
+import { readdir, readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
+import { existsSync, readFileSync, mkdirSync } from 'fs';
+import { homedir } from 'os';
 
 const PERSONAL_OS_DIR = process.env.PERSONAL_OS_DIR || '/Users/zebrey/Documents/GitHub/personal-os';
 const HEARTBEAT_DIR = join(PERSONAL_OS_DIR, 'heartbeat');
 const HEARTBEAT_SCRIPT = join(HEARTBEAT_DIR, 'run-heartbeat.sh');
+const TOKEN_CACHE_DIR = join(homedir(), '.local', 'state', 'crabhud');
+const TOKEN_CACHE_PATH = join(TOKEN_CACHE_DIR, 'oauth-token');
+
+/**
+ * Cache the OAuth token to disk so LaunchAgent-started CRABHUD can use it.
+ * Called on server startup when CLAUDE_CODE_OAUTH_TOKEN is in env.
+ */
+async function cacheOAuthToken(token: string) {
+  try {
+    if (!existsSync(TOKEN_CACHE_DIR)) mkdirSync(TOKEN_CACHE_DIR, { recursive: true });
+    await writeFile(TOKEN_CACHE_PATH, token, { mode: 0o600 });
+    console.log('💓 OAuth token cached for heartbeat auth');
+  } catch (e) {
+    console.error('Failed to cache OAuth token:', e);
+  }
+}
+
+/**
+ * Get the best available OAuth token (env first, then cache file).
+ */
+function getOAuthToken(): string | null {
+  // Live env var (set when started from Claude Desktop context)
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) return process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  // Cached from a previous Desktop-started session
+  try {
+    if (existsSync(TOKEN_CACHE_PATH)) return readFileSync(TOKEN_CACHE_PATH, 'utf-8').trim();
+  } catch {}
+  return null;
+}
 
 // In-memory state + scheduler
 let heartbeatState = {
@@ -77,10 +108,28 @@ export async function triggerPulse(): Promise<{ success: boolean; output?: strin
   heartbeatState.pulseRunning = true;
 
   try {
+    // Build clean env: strip Claude Code session vars that block nesting,
+    // but preserve/inject the OAuth token for subscription-based auth
+    const cleanEnv = { ...process.env };
+    const STRIP_VARS = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_AGENT_SDK_VERSION',
+      'CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES', 'CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL',
+      '__CFBundleIdentifier', 'MCP_'];
+    for (const key of STRIP_VARS) delete cleanEnv[key];
+    // Also strip any other CLAUDE_ vars except the OAuth token
+    for (const key of Object.keys(cleanEnv)) {
+      if (key.startsWith('CLAUDE_') && key !== 'CLAUDE_CODE_OAUTH_TOKEN') delete cleanEnv[key];
+    }
+
+    // Inject OAuth token (from env or cached) for subscription auth
+    const oauthToken = getOAuthToken();
+    if (oauthToken) {
+      cleanEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
+    }
+
     const proc = Bun.spawn(['bash', HEARTBEAT_SCRIPT], {
       cwd: PERSONAL_OS_DIR,
       env: {
-        ...process.env,
+        ...cleanEnv,
         HEARTBEAT_MODEL: process.env.HEARTBEAT_MODEL || 'haiku',
       },
       stdout: 'pipe',
@@ -190,6 +239,11 @@ export async function updateHeartbeatConfig(config: {
  * Initialize heartbeat state
  */
 export async function initHeartbeat() {
+  // Cache OAuth token if available (for later use by LaunchAgent-started instances)
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    await cacheOAuthToken(process.env.CLAUDE_CODE_OAUTH_TOKEN);
+  }
+
   // Find last pulse time from most recent heartbeat file
   const outputs = await getHeartbeatOutputs(1);
   if (outputs.length > 0) {
@@ -200,5 +254,6 @@ export async function initHeartbeat() {
   heartbeatState.enabled = false;
   heartbeatState.frequencyMinutes = 240;
 
-  console.log(`💓 Heartbeat: OFF | ${heartbeatState.frequencyMinutes}min interval (toggle ON in CRABHUD)`);
+  const hasToken = !!getOAuthToken();
+  console.log(`💓 Heartbeat: OFF | ${heartbeatState.frequencyMinutes}min interval | Auth: ${hasToken ? 'subscription ✓' : 'NO TOKEN ✗'}`);
 }

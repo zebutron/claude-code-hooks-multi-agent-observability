@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.zeb.crabhud</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/zebrey/.bun/bin/bun</string>
+        <string>scripts/crabhud-launcher.ts</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/zebrey/Documents/GitHub/hod</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/zebrey/.bun/bin:/Users/zebrey/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/zebrey</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/zebrey/.local/state/crabhud/launchd-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/zebrey/.local/state/crabhud/launchd-stderr.log</string>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+</dict>
+</plist>
