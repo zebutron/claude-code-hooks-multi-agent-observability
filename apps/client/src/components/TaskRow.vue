@@ -16,43 +16,45 @@
   >
     <!-- Collapsed Row -->
     <div
-      class="flex items-center gap-2.5 px-4 py-2.5 cursor-pointer select-none hover:bg-white/5 transition-colors"
+      class="flex items-center gap-2 px-3 py-2 cursor-pointer select-none hover:bg-white/5 transition-colors"
       @click="onRowClick"
     >
       <!-- Status dot -->
-      <span class="shrink-0 w-2.5 h-2.5 rounded-full" :class="statusDotClass" />
+      <span class="shrink-0 w-2 h-2 rounded-full" :class="statusDotClass" />
 
       <!-- Priority badge (only P0/P1 — P2/P3 are default, no need to show) -->
       <span
         v-if="task.priority === 'P0'"
-        class="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-500/20 text-red-400"
+        class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded bg-red-500/20 text-red-400"
       >P0</span>
       <span
         v-else-if="task.priority === 'P1'"
-        class="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400/80"
+        class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded bg-amber-500/15 text-amber-400/80"
       >P1</span>
 
-      <!-- Title -->
-      <span class="font-medium text-sm text-stone-100 truncate">
-        {{ task.title }}
-      </span>
+      <!-- Title (smaller font, scrolls when expanded) -->
+      <div class="min-w-0 flex-1 overflow-hidden">
+        <div
+          class="text-xs font-medium text-stone-100"
+          :class="isExpanded ? 'title-scroll' : 'truncate'"
+        >
+          <span ref="titleTextRef">{{ task.title }}</span>
+        </div>
+      </div>
 
       <!-- Tags -->
       <div v-if="task.tags && task.tags.length" class="flex gap-1 shrink-0">
         <span
           v-for="tag in task.tags"
           :key="tag"
-          class="text-[9px] font-medium px-1.5 py-0.5 rounded bg-stone-700/60 text-stone-400"
+          class="text-[8px] font-medium px-1 py-0.5 rounded bg-stone-700/60 text-stone-400"
         >
           {{ tag }}
         </span>
       </div>
 
-      <!-- Spacer -->
-      <div class="flex-1" />
-
       <!-- Blocked reason — red text, horizontal scroll with fade masks -->
-      <div v-if="task.blocked_by" class="blocked-reason-container hidden sm:block shrink-0 max-w-[280px]">
+      <div v-if="task.blocked_by" class="blocked-reason-container hidden sm:block shrink-0 max-w-[200px]">
         <div class="blocked-reason-scroll">
           <span class="text-[10px] text-[#ff2d6f] font-medium whitespace-nowrap">
             {{ task.blocked_reason }}
@@ -89,6 +91,15 @@
           </div>
         </div>
       </div>
+
+      <!-- Archive button (far right) -->
+      <button
+        @click.stop="$emit('archive', task.id)"
+        class="shrink-0 w-5 h-5 flex items-center justify-center rounded text-stone-700 hover:text-red-400 hover:bg-stone-800 transition-colors"
+        title="Archive"
+      >
+        <span class="text-[10px]">✕</span>
+      </button>
     </div>
 
     <!-- Drop indicator -->
@@ -119,7 +130,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import type { Task } from '../types';
 import TaskDetail from './TaskDetail.vue';
 
@@ -139,10 +150,9 @@ const emit = defineEmits<{
 
 const isExpanded = ref(false);
 const isDragOver = ref(false);
+const titleTextRef = ref<HTMLElement | null>(null);
 
 // Status colors — neon palette, max contrast against stone-950
-// Blocked: neon red-fuchsia, Unrated: bright cyan, Active: bright yellow,
-// Queued: bright purple, Done: neon lime
 const statusBorderClass = computed(() => ({
   'border-l-2 border-[#ff2d6f]': props.task.status === 'blocked',
   'border-l-2 border-[#ffee00]': props.task.status === 'active',
@@ -180,6 +190,19 @@ function fmt(n: number): string {
   if (n >= 1000) return (n / 1000).toFixed(0) + 'k';
   return String(n);
 }
+
+// Title scroll animation when expanded
+watch(isExpanded, async (expanded) => {
+  if (expanded) {
+    await nextTick();
+    const el = titleTextRef.value;
+    if (el && el.scrollWidth > el.parentElement!.clientWidth) {
+      // Title overflows — start scroll animation
+      const overflow = el.scrollWidth - el.parentElement!.clientWidth;
+      el.style.setProperty('--scroll-distance', `-${overflow + 20}px`);
+    }
+  }
+});
 
 // Drag & drop
 let isDragging = false;
@@ -280,5 +303,18 @@ function onRowClick() {
 }
 .blocked-reason-scroll::-webkit-scrollbar {
   display: none;
+}
+
+/* Title scroll animation for expanded items with overflow */
+.title-scroll span {
+  display: inline-block;
+  white-space: nowrap;
+  animation: title-marquee 8s linear infinite;
+  animation-delay: 1s;
+}
+@keyframes title-marquee {
+  0%, 10% { transform: translateX(0); }
+  45%, 55% { transform: translateX(var(--scroll-distance, -100px)); }
+  90%, 100% { transform: translateX(0); }
 }
 </style>

@@ -52,74 +52,166 @@
       </div>
     </div>
 
-    <!-- Rationale — click to edit -->
-    <div v-if="editingRationale" class="flex gap-2">
-      <input
-        ref="rationaleInput"
-        v-model="editRationaleValue"
-        type="text"
-        class="flex-1 px-2 py-1 text-sm rounded bg-stone-900 border border-stone-600 text-stone-200 italic focus:outline-none focus:border-stone-400"
-        placeholder="Why this priority/approach..."
-        @keydown.enter="saveRationale"
-        @keydown.escape="editingRationale = false"
-        @blur="saveRationale"
-      />
-    </div>
-    <div
-      v-else
-      @click="startEditRationale"
-      class="text-sm italic cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors"
-      :class="task.rationale ? 'text-stone-300' : 'text-stone-600'"
-    >
-      {{ task.rationale || 'Add rationale...' }}
-    </div>
-
-    <!-- Description — click to edit -->
-    <div v-if="editingDescription" class="flex gap-2">
-      <input
-        ref="descriptionInput"
-        v-model="editDescriptionValue"
-        type="text"
-        class="flex-1 px-2 py-1 text-sm rounded bg-stone-900 border border-stone-600 text-stone-200 focus:outline-none focus:border-stone-400"
-        placeholder="Description..."
-        @keydown.enter="saveDescription"
-        @keydown.escape="editingDescription = false"
-        @blur="saveDescription"
-      />
-    </div>
-    <div
-      v-else
-      @click="startEditDescription"
-      class="text-sm cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors"
-      :class="task.description ? 'text-stone-300' : 'text-stone-600'"
-    >
-      {{ task.description || 'Add description...' }}
+    <!-- Inline editable Title -->
+    <div class="flex items-center gap-2">
+      <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider w-10 shrink-0">Title</span>
+      <div v-if="editingTitle" class="flex-1 flex gap-2">
+        <input
+          ref="titleInput"
+          v-model="editTitleValue"
+          type="text"
+          class="flex-1 px-2 py-1 text-sm rounded bg-stone-900 border border-stone-600 text-stone-100 font-medium focus:outline-none focus:border-stone-400"
+          @keydown.enter="saveTitle"
+          @keydown.escape="editingTitle = false"
+          @blur="saveTitle"
+        />
+      </div>
+      <div
+        v-else
+        @click="startEditTitle"
+        class="flex-1 text-sm font-medium cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors text-stone-100"
+      >
+        {{ task.title }}
+      </div>
     </div>
 
-    <!-- Scores — clickable to cycle 1-10 -->
-    <div class="flex flex-wrap gap-3 sm:gap-5 text-xs">
+    <!-- Inline editable Priority + Tags -->
+    <div class="flex items-center gap-3 flex-wrap">
+      <!-- Priority selector -->
+      <div class="flex items-center gap-1.5">
+        <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Priority</span>
+        <div class="flex gap-0.5">
+          <button
+            v-for="p in ['P0','P1','P2','P3']"
+            :key="p"
+            @click="$emit('update', { priority: p })"
+            class="px-1.5 py-0.5 text-[9px] font-bold rounded transition-colors"
+            :class="task.priority === p
+              ? priorityActiveClass(p)
+              : 'bg-stone-800 text-stone-600 hover:text-stone-400'"
+          >{{ p }}</button>
+        </div>
+      </div>
+
+      <!-- Tags editor -->
+      <div class="flex items-center gap-1.5 flex-1 min-w-0">
+        <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider shrink-0">Tags</span>
+        <div v-if="editingTags" class="flex-1 flex gap-1.5">
+          <input
+            ref="tagsInput"
+            v-model="editTagsValue"
+            type="text"
+            placeholder="comma,separated,tags"
+            class="flex-1 px-2 py-0.5 text-[10px] rounded bg-stone-900 border border-stone-600 text-stone-300 focus:outline-none focus:border-stone-400"
+            @keydown.enter="saveTags"
+            @keydown.escape="editingTags = false"
+            @blur="saveTags"
+          />
+        </div>
+        <div
+          v-else
+          @click="startEditTags"
+          class="flex gap-1 items-center cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors min-w-0"
+        >
+          <span
+            v-if="task.tags && task.tags.length"
+            v-for="tag in task.tags"
+            :key="tag"
+            class="text-[9px] font-medium px-1.5 py-0.5 rounded bg-stone-700/60 text-stone-400"
+          >{{ tag }}</span>
+          <span v-else class="text-[9px] text-stone-600 italic">+ add tags</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Goal (was Rationale) — click to edit -->
+    <div>
+      <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Goal</span>
+      <div v-if="editingRationale" class="mt-1">
+        <textarea
+          ref="rationaleInput"
+          v-model="editRationaleValue"
+          class="w-full px-2 py-1 text-xs rounded bg-stone-900 border border-stone-600 text-stone-200 italic focus:outline-none focus:border-stone-400 resize-none"
+          placeholder="What outcome does this achieve..."
+          rows="2"
+          @keydown.escape="editingRationale = false"
+          @blur="saveRationale"
+        />
+      </div>
+      <div
+        v-else
+        @click="startEditRationale"
+        class="text-xs italic cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors mt-0.5"
+        :class="task.rationale ? 'text-stone-300' : 'text-stone-600'"
+      >
+        {{ task.rationale || 'Add goal...' }}
+      </div>
+    </div>
+
+    <!-- Context (was Description) — click to edit -->
+    <div>
+      <span class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Context</span>
+      <div v-if="editingDescription" class="mt-1">
+        <textarea
+          ref="descriptionInput"
+          v-model="editDescriptionValue"
+          class="w-full px-2 py-1 text-xs rounded bg-stone-900 border border-stone-600 text-stone-200 focus:outline-none focus:border-stone-400 resize-none"
+          placeholder="Relevant background, constraints, resources..."
+          rows="3"
+          @keydown.escape="editingDescription = false"
+          @blur="saveDescription"
+        />
+      </div>
+      <div
+        v-else
+        @click="startEditDescription"
+        class="text-xs cursor-pointer hover:bg-stone-800/50 rounded px-1 -mx-1 py-0.5 transition-colors mt-0.5"
+        :class="task.description ? 'text-stone-300' : 'text-stone-600'"
+      >
+        {{ task.description || 'Add context...' }}
+      </div>
+    </div>
+
+    <!-- Metrics — IMPACT / TIME / COST / RISK / FIT -->
+    <div class="flex flex-wrap gap-3 sm:gap-4 text-xs">
       <button
         @click="cycleScore('roi_score')"
-        class="flex items-center gap-1.5 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
-        title="Click to change ROI score (1-10)"
+        class="flex items-center gap-1 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
+        title="Click to change IMPACT score (1-10)"
       >
-        <span class="text-stone-500">ROI</span>
+        <span class="text-[9px] font-bold text-stone-600 uppercase">IMPACT</span>
         <span class="font-bold text-stone-200">{{ task.roi_score }}</span>
       </button>
       <button
-        @click="cycleScore('risk_score')"
-        class="flex items-center gap-1.5 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
-        title="Click to change Risk score (1-10)"
+        @click="cycleEstimatedMinutes"
+        class="flex items-center gap-1 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
+        title="Click to cycle TIME estimate"
       >
-        <span class="text-stone-500">Risk</span>
+        <span class="text-[9px] font-bold text-stone-600 uppercase">TIME</span>
+        <span class="font-bold text-stone-200">{{ formatTime(task.estimated_minutes) }}</span>
+      </button>
+      <button
+        @click="cycleEstimatedTokens"
+        class="flex items-center gap-1 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
+        title="Click to cycle COST estimate"
+      >
+        <span class="text-[9px] font-bold text-stone-600 uppercase">COST</span>
+        <span class="font-bold text-stone-200">{{ formatCost(task.estimated_tokens) }}</span>
+      </button>
+      <button
+        @click="cycleScore('risk_score')"
+        class="flex items-center gap-1 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
+        title="Click to change RISK score (1-10)"
+      >
+        <span class="text-[9px] font-bold text-stone-600 uppercase">RISK</span>
         <span class="font-bold text-stone-200">{{ task.risk_score }}</span>
       </button>
       <button
         @click="cycleScore('fit_score')"
-        class="flex items-center gap-1.5 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
-        title="Click to change AI Fit score (1-10)"
+        class="flex items-center gap-1 hover:bg-stone-800/50 rounded px-1.5 py-0.5 -mx-1 transition-colors"
+        title="Click to change FIT score (1-10)"
       >
-        <span class="text-stone-500">AI Fit</span>
+        <span class="text-[9px] font-bold text-stone-600 uppercase">FIT</span>
         <span class="font-bold text-stone-200">{{ task.fit_score }}</span>
       </button>
 
@@ -150,20 +242,13 @@
         >
           ⏸ Block
         </button>
-        <button
-          @click="$emit('archive')"
-          class="detail-action-btn text-stone-600 hover:text-red-400"
-          title="Archive this task"
-        >
-          ✕
-        </button>
       </div>
     </div>
 
-    <!-- Agent delegation -->
+    <!-- Agent delegation — SPAWN -->
     <div class="bg-stone-900/60 border border-stone-700/40 rounded-lg p-3 space-y-2">
       <div class="flex items-center justify-between">
-        <div class="text-[10px] font-semibold text-stone-500 uppercase tracking-wider">Agent</div>
+        <div class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Agent</div>
         <!-- Running agent indicator -->
         <div v-if="runningAgent" class="flex items-center gap-1.5">
           <span class="w-1.5 h-1.5 rounded-full bg-[#39ff14] animate-pulse" />
@@ -197,13 +282,13 @@
         </button>
       </div>
 
-      <!-- No agent running — show assign button -->
+      <!-- No agent running — show SPAWN button -->
       <div v-else-if="task.status !== 'complete' && task.status !== 'archived'">
         <div v-if="task.agent_session_id" class="text-[10px] text-stone-500 mb-1.5">
           Previous: <span class="font-mono">{{ task.agent_session_id.slice(0, 12) }}...</span>
           <span v-if="task.last_agent_activity"> · {{ timeAgo(task.last_agent_activity) }}</span>
         </div>
-        <!-- Assign form -->
+        <!-- SPAWN form -->
         <div v-if="showAssignForm" class="space-y-2">
           <input
             v-model="assignProjectDir"
@@ -233,13 +318,19 @@
             class="w-full px-2 py-1 text-xs rounded bg-stone-950 border border-stone-700/50 text-stone-300 placeholder-stone-600 focus:outline-none focus:border-stone-500 resize-none"
             rows="2"
           />
+          <textarea
+            v-model="assignInstructions"
+            placeholder="Additional instructions for the agent (optional)..."
+            class="w-full px-2 py-1 text-xs rounded bg-stone-950 border border-stone-700/50 text-stone-300 placeholder-stone-600 focus:outline-none focus:border-stone-500 resize-none"
+            rows="2"
+          />
           <div class="flex gap-2">
             <button
               @click="handleAssign"
               :disabled="assigningAgent"
-              class="px-3 py-1.5 text-xs font-medium rounded bg-emerald-600 hover:bg-emerald-500 text-white transition-colors disabled:opacity-50"
+              class="px-4 py-1.5 text-xs font-bold rounded bg-emerald-600 hover:bg-emerald-500 text-white transition-colors disabled:opacity-50 uppercase tracking-wider"
             >
-              {{ assigningAgent ? 'Spawning...' : 'Spawn Agent' }}
+              {{ assigningAgent ? 'Spawning...' : '⚡ SPAWN' }}
             </button>
             <button
               @click="showAssignForm = false"
@@ -250,13 +341,13 @@
           </div>
           <div v-if="assignError" class="text-[10px] text-red-400">{{ assignError }}</div>
         </div>
-        <!-- Simple assign button -->
+        <!-- Simple SPAWN button -->
         <button
           v-else
           @click="showAssignForm = true"
-          class="px-3 py-1.5 text-xs font-medium rounded bg-stone-800 border border-stone-700/50 text-stone-300 hover:bg-stone-700 hover:text-stone-100 transition-colors"
+          class="px-4 py-1.5 text-xs font-bold rounded bg-stone-800 border border-stone-700/50 text-stone-300 hover:bg-stone-700 hover:text-stone-100 transition-colors uppercase tracking-wider"
         >
-          Assign Agent
+          ⚡ SPAWN
         </button>
       </div>
 
@@ -269,7 +360,7 @@
 
     <!-- Activity log (notes) -->
     <div v-if="task.notes" class="rounded-lg overflow-hidden">
-      <div class="text-[10px] font-semibold text-stone-500 uppercase tracking-wider mb-1">Activity</div>
+      <div class="text-[9px] font-bold text-stone-600 uppercase tracking-wider mb-1">Activity</div>
       <div class="space-y-1 max-h-32 overflow-y-auto">
         <div
           v-for="(entry, i) in parsedNotes"
@@ -335,6 +426,7 @@ const assignProjectDir = ref('');
 const assignModel = ref('');
 const assignMaxTurns = ref<number | undefined>(undefined);
 const assignScope = ref('');
+const assignInstructions = ref('');
 const assigningAgent = ref(false);
 const stoppingAgent = ref(false);
 const assignError = ref('');
@@ -352,14 +444,16 @@ async function handleAssign() {
       model: assignModel.value || undefined,
       max_turns: assignMaxTurns.value || undefined,
       scope_description: assignScope.value.trim() || undefined,
+      additional_instructions: assignInstructions.value.trim() || undefined,
     });
     showAssignForm.value = false;
     assignProjectDir.value = '';
     assignModel.value = '';
     assignMaxTurns.value = undefined;
     assignScope.value = '';
+    assignInstructions.value = '';
   } catch (e: any) {
-    assignError.value = e.message || 'Failed to assign agent';
+    assignError.value = e.message || 'Failed to spawn agent';
   } finally {
     assigningAgent.value = false;
   }
@@ -378,11 +472,54 @@ async function handleStopAgent() {
   }
 }
 
-// ── Inline editing: Rationale ────────────────────────────────────────
+// ── Inline editing: Title ────────────────────────────────────────────
+
+const editingTitle = ref(false);
+const editTitleValue = ref('');
+const titleInput = ref<HTMLInputElement | null>(null);
+
+async function startEditTitle() {
+  editTitleValue.value = props.task.title;
+  editingTitle.value = true;
+  await nextTick();
+  titleInput.value?.focus();
+}
+
+function saveTitle() {
+  editingTitle.value = false;
+  const val = editTitleValue.value.trim();
+  if (val && val !== props.task.title) {
+    emit('update', { title: val });
+  }
+}
+
+// ── Inline editing: Tags ─────────────────────────────────────────────
+
+const editingTags = ref(false);
+const editTagsValue = ref('');
+const tagsInput = ref<HTMLInputElement | null>(null);
+
+async function startEditTags() {
+  editTagsValue.value = (props.task.tags || []).join(', ');
+  editingTags.value = true;
+  await nextTick();
+  tagsInput.value?.focus();
+}
+
+function saveTags() {
+  editingTags.value = false;
+  const newTags = editTagsValue.value.split(',').map(t => t.trim()).filter(t => t.length > 0);
+  const oldTags = (props.task.tags || []).join(',');
+  if (newTags.join(',') !== oldTags) {
+    emit('update', { tags: newTags } as any);
+  }
+}
+
+// ── Inline editing: Rationale (Goal) ─────────────────────────────────
 
 const editingRationale = ref(false);
 const editRationaleValue = ref('');
-const rationaleInput = ref<HTMLInputElement | null>(null);
+const rationaleInput = ref<HTMLTextAreaElement | null>(null);
 
 async function startEditRationale() {
   editRationaleValue.value = props.task.rationale || '';
@@ -399,11 +536,11 @@ function saveRationale() {
   }
 }
 
-// ── Inline editing: Description ──────────────────────────────────────
+// ── Inline editing: Description (Context) ────────────────────────────
 
 const editingDescription = ref(false);
 const editDescriptionValue = ref('');
-const descriptionInput = ref<HTMLInputElement | null>(null);
+const descriptionInput = ref<HTMLTextAreaElement | null>(null);
 
 async function startEditDescription() {
   editDescriptionValue.value = props.task.description || '';
@@ -426,6 +563,49 @@ function cycleScore(field: 'roi_score' | 'risk_score' | 'fit_score') {
   const current = props.task[field];
   const next = current >= 10 ? 1 : current + 1;
   emit('update', { [field]: next } as any);
+}
+
+// ── TIME cycling (estimated_minutes) ─────────────────────────────────
+const timeSteps = [null, 5, 15, 30, 60, 120, 240, 480];
+function cycleEstimatedMinutes() {
+  const current = props.task.estimated_minutes;
+  const idx = timeSteps.indexOf(current);
+  const next = timeSteps[(idx + 1) % timeSteps.length];
+  emit('update', { estimated_minutes: next } as any);
+}
+
+function formatTime(mins: number | null): string {
+  if (!mins) return '—';
+  if (mins < 60) return `${mins}m`;
+  return `${(mins / 60).toFixed(0)}h`;
+}
+
+// ── COST cycling (estimated_tokens) ──────────────────────────────────
+const costSteps = [null, 10000, 50000, 100000, 500000, 1000000];
+function cycleEstimatedTokens() {
+  const current = props.task.estimated_tokens;
+  const idx = costSteps.indexOf(current);
+  const next = costSteps[(idx + 1) % costSteps.length];
+  emit('update', { estimated_tokens: next } as any);
+}
+
+function formatCost(tokens: number | null): string {
+  if (!tokens) return '—';
+  if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
+  if (tokens >= 1000) return `${(tokens / 1000).toFixed(0)}k`;
+  return String(tokens);
+}
+
+// ── Priority active class helper ─────────────────────────────────────
+
+function priorityActiveClass(p: string): string {
+  switch (p) {
+    case 'P0': return 'bg-red-500/20 text-red-400';
+    case 'P1': return 'bg-amber-500/15 text-amber-400';
+    case 'P2': return 'bg-stone-700 text-stone-200';
+    case 'P3': return 'bg-stone-800 text-stone-400';
+    default: return 'bg-stone-700 text-stone-200';
+  }
 }
 
 // ── Quick block ──────────────────────────────────────────────────────

@@ -15,36 +15,20 @@
       <!-- Tab bar -->
       <div class="px-4 pt-2 flex items-center gap-4">
         <button
-          @click="activeTab = 'prio'"
+          v-for="tab in tabs"
+          :key="tab.id"
+          @click="activeTab = tab.id"
           class="pb-2 text-sm font-medium border-b-2 transition-colors"
-          :class="activeTab === 'prio'
+          :class="activeTab === tab.id
             ? 'text-stone-100 border-stone-100'
             : 'text-stone-500 border-transparent hover:text-stone-300'"
         >
-          STACK
-        </button>
-        <button
-          @click="activeTab = 'digest'"
-          class="pb-2 text-sm font-medium border-b-2 transition-colors"
-          :class="activeTab === 'digest'
-            ? 'text-stone-100 border-stone-100'
-            : 'text-stone-500 border-transparent hover:text-stone-300'"
-        >
-          REPORT
-        </button>
-        <button
-          @click="activeTab = 'output'"
-          class="pb-2 text-sm font-medium border-b-2 transition-colors"
-          :class="activeTab === 'output'
-            ? 'text-stone-100 border-stone-100'
-            : 'text-stone-500 border-transparent hover:text-stone-300'"
-        >
-          LOG
+          {{ tab.label }}
         </button>
       </div>
 
-      <!-- Usage Meter + Resource Locks (below tabs, always visible) -->
-      <div class="px-4 py-2 flex items-center gap-4">
+      <!-- Usage Meter + Resource Locks (STACK tab only) -->
+      <div v-if="activeTab === 'prio'" class="px-4 py-2 flex items-center gap-4">
         <UsageMeter :usage="usage" :claude-usage="claudeUsage" class="flex-1" />
         <ResourceLocks />
       </div>
@@ -138,12 +122,6 @@
             <option value="P2">P2</option>
             <option value="P3">P3</option>
           </select>
-          <select v-model="newTaskStatus" class="px-2 py-1 text-[10px] rounded bg-stone-950 border border-stone-700/50 text-stone-300">
-            <option value="queued">Queued</option>
-            <option value="active">Active</option>
-            <option value="discovered">Unrated</option>
-            <option value="blocked">Blocked</option>
-          </select>
           <input
             v-model="newTaskTagsRaw"
             type="text"
@@ -196,13 +174,88 @@
       />
     </div>
 
-    <!-- ═══ DAILY DIGEST TAB ═══ -->
-    <div v-if="activeTab === 'digest'" class="flex-1 overflow-y-auto px-4 py-4">
-      <DigestPanel :force-expanded="true" />
+    <!-- ═══ REPORT TAB ═══ -->
+    <div v-if="activeTab === 'report'" class="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <!-- Report header -->
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-bold text-stone-300 uppercase tracking-wider">Productivity Report</h2>
+        <button
+          @click="refreshReport"
+          class="px-3 py-1 text-[10px] font-medium rounded bg-stone-800 border border-stone-700/50 text-stone-400 hover:text-stone-200 transition-colors"
+        >
+          ↻ Refresh
+        </button>
+      </div>
+
+      <!-- Velocity stats -->
+      <div class="grid grid-cols-3 gap-3">
+        <div class="bg-stone-900/60 rounded-lg border border-stone-800/50 p-3 text-center">
+          <div class="text-2xl font-bold text-[#39ff14]">{{ reportStats.completedToday }}</div>
+          <div class="text-[9px] text-stone-500 uppercase tracking-wider mt-1">Completed Today</div>
+        </div>
+        <div class="bg-stone-900/60 rounded-lg border border-stone-800/50 p-3 text-center">
+          <div class="text-2xl font-bold text-[#00e5ff]">{{ reportStats.completedWeek }}</div>
+          <div class="text-[9px] text-stone-500 uppercase tracking-wider mt-1">This Week</div>
+        </div>
+        <div class="bg-stone-900/60 rounded-lg border border-stone-800/50 p-3 text-center">
+          <div class="text-2xl font-bold text-[#c084fc]">{{ reportStats.activeNow }}</div>
+          <div class="text-[9px] text-stone-500 uppercase tracking-wider mt-1">Active Now</div>
+        </div>
+      </div>
+
+      <!-- System health -->
+      <div class="bg-stone-900/60 rounded-lg border border-stone-800/50 p-3 space-y-2">
+        <div class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">System Health</div>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div class="flex justify-between">
+            <span class="text-stone-500">CRABHUD</span>
+            <span class="text-[#39ff14]">● Online</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-stone-500">Heartbeat</span>
+            <span :class="heartbeatStatus.enabled ? 'text-[#39ff14]' : 'text-stone-600'">
+              {{ heartbeatStatus.enabled ? '● Active' : '○ Off' }}
+            </span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-stone-500">Agents Running</span>
+            <span :class="agentStats.running > 0 ? 'text-[#ffee00]' : 'text-stone-500'">{{ agentStats.running }}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-stone-500">Queue Depth</span>
+            <span class="text-stone-300">{{ reportStats.queueDepth }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent completions -->
+      <div class="space-y-1">
+        <div class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Recent Completions</div>
+        <div v-if="recentCompletions.length === 0" class="text-xs text-stone-600 italic py-4 text-center">
+          No completed tasks yet
+        </div>
+        <div
+          v-for="task in recentCompletions"
+          :key="task.id"
+          class="flex items-center gap-2 px-3 py-2 rounded-lg bg-stone-900/40 border border-stone-800/30"
+        >
+          <span class="w-2 h-2 rounded-full bg-[#39ff14] shrink-0" />
+          <span class="text-xs text-stone-300 truncate flex-1">{{ task.title }}</span>
+          <span class="text-[10px] text-stone-600 font-mono shrink-0">
+            {{ task.completed_at ? formatDate(task.completed_at) : '' }}
+          </span>
+        </div>
+      </div>
+
+      <!-- Session log summaries (from personal-os) -->
+      <div class="space-y-1">
+        <div class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Latest Session Activity</div>
+        <DigestPanel :force-expanded="true" />
+      </div>
     </div>
 
-    <!-- ═══ OUTPUT TAB ═══ -->
-    <div v-if="activeTab === 'output'" class="flex-1 flex flex-col overflow-hidden">
+    <!-- ═══ LOG TAB ═══ -->
+    <div v-if="activeTab === 'log'" class="flex-1 flex flex-col overflow-hidden">
 
       <!-- Output header: controls + PULSE button -->
       <div class="px-4 py-3 border-b border-stone-800 bg-stone-900/50">
@@ -241,7 +294,7 @@
             </div>
 
             <!-- Next scheduled -->
-            <div v-if="heartbeatStatus.enabled && heartbeatStatus.nextScheduled" class="flex items-center gap-1.5">
+            <div v-if="heartbeatStatus.enabled && heartbeatStatus.nextScheduled" class="flex items-center gap-1.5 hidden sm:flex">
               <span class="text-[10px] text-stone-500 uppercase tracking-wider">Next</span>
               <span class="text-xs font-mono text-stone-300">{{ formatTimestamp(heartbeatStatus.nextScheduled) }}</span>
             </div>
@@ -265,8 +318,8 @@
         </div>
       </div>
 
-      <!-- Output log (scrollable) -->
-      <div class="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+      <!-- Output log (scrollable, newest first) -->
+      <div class="flex-1 overflow-y-auto px-4 py-3 space-y-2">
         <!-- Loading -->
         <div v-if="heartbeatLoading" class="flex items-center justify-center py-12">
           <div class="text-stone-500 text-sm">Loading heartbeat outputs...</div>
@@ -279,33 +332,153 @@
           <div class="text-sm text-stone-600">Hit PULSE to fire your first heartbeat</div>
         </div>
 
-        <!-- Output entries -->
+        <!-- Output entries (concise: title, why now, next steps) -->
         <div
           v-else
-          v-for="(output, idx) in heartbeatOutputs"
-          :key="output.filename"
+          v-for="(entry, idx) in parsedHeartbeatEntries"
+          :key="entry.filename"
           class="rounded-lg border overflow-hidden"
           :class="idx === 0
             ? 'border-stone-700/70 bg-stone-900/60'
             : 'border-stone-800/50 bg-stone-900/30'"
         >
-          <!-- Entry header -->
-          <div class="px-3 py-1.5 border-b flex items-center justify-between"
-            :class="idx === 0 ? 'border-stone-700/50 bg-stone-800/30' : 'border-stone-800/30'"
+          <!-- Entry header (always visible) -->
+          <div
+            class="px-3 py-2 flex items-center justify-between cursor-pointer hover:bg-white/5 transition-colors"
+            @click="toggleLogEntry(entry.filename)"
           >
-            <div class="flex items-center gap-2">
-              <span v-if="idx === 0" class="w-1.5 h-1.5 rounded-full bg-[#39ff14]" />
-              <span class="text-[10px] font-mono" :class="idx === 0 ? 'text-stone-300' : 'text-stone-500'">
-                {{ output.date }}
+            <div class="flex items-center gap-2 min-w-0">
+              <span v-if="idx === 0" class="w-1.5 h-1.5 rounded-full bg-[#39ff14] shrink-0" />
+              <span class="text-[10px] font-mono shrink-0" :class="idx === 0 ? 'text-stone-300' : 'text-stone-500'">
+                {{ entry.date }}
               </span>
             </div>
-            <span class="text-[10px] font-mono text-stone-600">{{ output.filename }}</span>
+            <span class="text-[10px] text-stone-600">{{ expandedLogs.has(entry.filename) ? '▴' : '▾' }}</span>
           </div>
-          <!-- Rendered markdown content -->
+
+          <!-- Concise summary (top 3 tasks) -->
+          <div class="px-3 pb-2 space-y-1.5">
+            <div
+              v-for="(item, i) in entry.items"
+              :key="i"
+              class="flex gap-2 text-xs"
+            >
+              <span class="text-stone-600 shrink-0 font-mono">{{ i + 1 }}.</span>
+              <div class="min-w-0">
+                <div class="font-medium text-stone-200">{{ item.title }}</div>
+                <div class="text-stone-500 text-[10px]">{{ item.whyNow }}</div>
+                <div v-if="item.nextSteps" class="text-stone-400 text-[10px] truncate max-w-lg">→ {{ item.nextSteps.slice(0, 120) }}{{ item.nextSteps.length > 120 ? '…' : '' }}</div>
+              </div>
+            </div>
+            <div v-if="entry.items.length === 0" class="text-[10px] text-stone-600 italic">
+              No structured items parsed
+            </div>
+          </div>
+
+          <!-- Expandable raw output -->
+          <div v-if="expandedLogs.has(entry.filename)" class="border-t border-stone-800/40">
+            <div
+              class="px-4 py-3 text-stone-300 text-xs leading-relaxed max-w-none heartbeat-content"
+              v-html="renderMarkdown(entry.rawContent)"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ AGENTS TAB ═══ -->
+    <div v-if="activeTab === 'agents'" class="flex-1 flex flex-col overflow-hidden">
+
+      <!-- Usage timeseries chart -->
+      <div class="px-4 py-3 border-b border-stone-800 bg-stone-900/50">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Usage Velocity</div>
+          <UsageMeter :usage="usage" :claude-usage="claudeUsage" class="flex-shrink-0" />
+        </div>
+        <!-- Simple usage bars (timeseries placeholder until we have more data) -->
+        <div class="h-16 flex items-end gap-0.5">
           <div
-            class="px-4 py-3 text-stone-300 text-xs leading-relaxed max-w-none heartbeat-content"
-            v-html="renderMarkdown(output.content)"
+            v-for="(bar, i) in usageBars"
+            :key="i"
+            class="flex-1 rounded-t transition-all duration-300"
+            :style="{ height: bar.height + '%', backgroundColor: bar.color }"
+            :title="bar.label"
           />
+        </div>
+        <div class="flex justify-between text-[8px] text-stone-600 mt-1">
+          <span>24h ago</span>
+          <span>Now</span>
+        </div>
+      </div>
+
+      <!-- Agent list -->
+      <div class="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+        <!-- No agents -->
+        <div v-if="allAgents.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
+          <div class="text-4xl mb-3">🤖</div>
+          <div class="text-lg text-stone-400 mb-1">No agents</div>
+          <div class="text-sm text-stone-600">Spawn an agent from a task in STACK</div>
+        </div>
+
+        <!-- Agent cards -->
+        <div
+          v-for="agent in sortedAgents"
+          :key="agent.pid"
+          class="rounded-lg border overflow-hidden"
+          :class="agentCardClass(agent)"
+        >
+          <!-- Agent header -->
+          <div class="px-3 py-2 flex items-center gap-2">
+            <!-- Status dot with color matching chart -->
+            <span class="w-2.5 h-2.5 rounded-full shrink-0" :class="agentDotClass(agent)" />
+
+            <!-- Task title -->
+            <div class="min-w-0 flex-1">
+              <div class="text-xs font-medium text-stone-200 truncate">{{ agent.task_title }}</div>
+              <div class="text-[10px] text-stone-500">
+                PID {{ agent.pid }}
+                <span v-if="agent.model"> · {{ agent.model }}</span>
+                · {{ agentRuntime(agent) }}
+              </div>
+            </div>
+
+            <!-- Status badge -->
+            <span
+              class="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0"
+              :class="agentStatusBadgeClass(agent)"
+            >
+              {{ agent.status }}
+            </span>
+
+            <!-- Stop button (running only) -->
+            <button
+              v-if="agent.status === 'running'"
+              @click="handleStopAgent(agent.pid)"
+              class="shrink-0 px-2 py-1 text-[10px] font-medium rounded bg-red-950/60 border border-red-500/30 text-red-400 hover:bg-red-950 transition-colors"
+            >
+              Stop
+            </button>
+          </div>
+
+          <!-- Output tail (last lines) -->
+          <div v-if="agent.output_tail.length > 0 && agent.status === 'running'" class="px-3 pb-2">
+            <div class="max-h-20 overflow-y-auto rounded bg-black/30 p-2">
+              <div
+                v-for="(line, i) in agent.output_tail.slice(-5)"
+                :key="i"
+                class="text-[10px] font-mono text-stone-500 leading-tight"
+              >{{ line }}</div>
+            </div>
+          </div>
+
+          <!-- Needs attention indicator -->
+          <div
+            v-if="agentNeedsAttention(agent)"
+            class="px-3 py-1.5 bg-[#ff2d6f]/10 border-t border-[#ff2d6f]/20 flex items-center gap-2"
+          >
+            <span class="w-1.5 h-1.5 rounded-full bg-[#ff2d6f] animate-pulse" />
+            <span class="text-[10px] text-[#ff2d6f] font-medium">Needs attention — may be stalled</span>
+          </div>
         </div>
       </div>
     </div>
@@ -322,7 +495,7 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import type { Task, TaskPriority, TaskStatus } from '../types';
+import type { Task, TaskPriority, TaskStatus, AgentInfo } from '../types';
 import { useTaskTree } from '../composables/useTaskTree';
 import { useUsage } from '../composables/useUsage';
 import { useAgents } from '../composables/useAgents';
@@ -344,7 +517,7 @@ const {
 } = useTaskTree();
 
 const { usage, claudeUsage } = useUsage();
-const { stats: agentStats } = useAgents();
+const { agents: allAgents, stats: agentStats, stopAgent: stopAgentFn } = useAgents();
 const {
   outputs: heartbeatOutputs,
   status: heartbeatStatus,
@@ -355,7 +528,14 @@ const {
 
 // ── Tabs ─────────────────────────────────────────────────────────────
 
-const activeTab = ref<'prio' | 'digest' | 'output'>('prio');
+const tabs = [
+  { id: 'prio' as const, label: 'STACK' },
+  { id: 'report' as const, label: 'REPORT' },
+  { id: 'log' as const, label: 'LOG' },
+  { id: 'agents' as const, label: 'AGENTS' },
+];
+
+const activeTab = ref<'prio' | 'report' | 'log' | 'agents'>('prio');
 
 // ── Heartbeat controls ──────────────────────────────────────────────
 
@@ -398,49 +578,152 @@ function formatTimestamp(iso: string): string {
   }
 }
 
+// ── LOG: Parsed heartbeat entries (concise view) ─────────────────────
+
+const expandedLogs = reactive(new Set<string>());
+
+function toggleLogEntry(filename: string) {
+  if (expandedLogs.has(filename)) {
+    expandedLogs.delete(filename);
+  } else {
+    expandedLogs.add(filename);
+  }
+}
+
+interface HeartbeatItem {
+  title: string;
+  whyNow: string;
+  nextSteps: string;
+}
+
+interface ParsedHeartbeatEntry {
+  filename: string;
+  date: string;
+  items: HeartbeatItem[];
+  rawContent: string;
+}
+
+const parsedHeartbeatEntries = computed((): ParsedHeartbeatEntry[] => {
+  // Heartbeat outputs are already sorted newest first from the API
+  return heartbeatOutputs.value.map(output => {
+    const items = parseHeartbeatItems(output.content);
+    return {
+      filename: output.filename,
+      date: output.date,
+      items: items.slice(0, 3), // Top 3 only
+      rawContent: output.content,
+    };
+  });
+});
+
+/**
+ * Parse heartbeat markdown to extract top delegatable tasks.
+ * Looks for numbered headings (### 1. Title) or bold items.
+ */
+function parseHeartbeatItems(md: string): HeartbeatItem[] {
+  const items: HeartbeatItem[] = [];
+  const lines = md.split('\n');
+
+  let currentItem: Partial<HeartbeatItem> | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Match numbered task headings: "### 1. Title" or "### 1. Title (URGENT)" or "## 🚨 Title"
+    const headingMatch = line.match(/^#{2,3}\s+(?:\d+\.\s+)?(?:🚨\s*)?(.+?)(?:\s*\(.*\))?\s*$/);
+    const skipPatterns = ['Top 3', 'Needs Zeb', 'Stale', 'At Risk', 'Summary', 'Overview', 'Status', 'Quick Wins', 'Delegation', 'Next Steps', 'Action Items', 'Context', 'Crisis'];
+    const isSkipHeading = skipPatterns.some(p => headingMatch?.[1]?.includes(p));
+    if (headingMatch && !isSkipHeading && !line.includes('CRISIS') && !line.includes('Heartbeat')) {
+      // Save previous item
+      if (currentItem?.title) {
+        items.push({
+          title: currentItem.title,
+          whyNow: currentItem.whyNow || '',
+          nextSteps: currentItem.nextSteps || '',
+        });
+      }
+      currentItem = { title: headingMatch[1].replace(/\*\*/g, '').trim() };
+      continue;
+    }
+
+    // Check for crisis/top-level heading as an item
+    const crisisMatch = line.match(/^#{2,3}\s+(?:🚨\s*)?(?:CRISIS:\s*)?(.+)/);
+    if (crisisMatch && line.includes('CRISIS')) {
+      if (currentItem?.title) {
+        items.push({
+          title: currentItem.title,
+          whyNow: currentItem.whyNow || '',
+          nextSteps: currentItem.nextSteps || '',
+        });
+      }
+      currentItem = { title: crisisMatch[1].replace(/\*\*/g, '').trim() };
+      continue;
+    }
+
+    if (!currentItem) continue;
+
+    // Look for "Why now:" or bolded reason
+    if (line.match(/^\*\*Why now:?\*\*/i) || line.match(/^Why now:/i)) {
+      currentItem.whyNow = line.replace(/^\*\*Why now:?\*\*\s*/i, '').replace(/^Why now:\s*/i, '').replace(/\*\*/g, '').trim();
+    }
+
+    // Look for bold lines as "why now" if none found yet
+    if (!currentItem.whyNow) {
+      const boldMatch = line.match(/^\*\*(.+?)\*\*/);
+      if (boldMatch && !line.startsWith('###') && !line.includes('Delegation')) {
+        currentItem.whyNow = boldMatch[1].trim();
+      }
+    }
+
+    // Look for "Next steps" or "Done looks like" or "Delegation prompt"
+    if (!line.startsWith('#') && (line.match(/next\s*step/i) || line.match(/done\s*looks?\s*like/i) || line.match(/delegation\s*prompt/i))) {
+      const nextLine = lines[i + 1]?.trim();
+      if (nextLine && (nextLine.startsWith('-') || nextLine.startsWith('>') || nextLine.startsWith('*'))) {
+        currentItem.nextSteps = nextLine.replace(/^[-*>]\s*/, '').replace(/\*\*/g, '').trim();
+      } else if (!line.startsWith('**Delegation')) {
+        currentItem.nextSteps = line.replace(/.*?:/i, '').replace(/\*\*/g, '').trim();
+      }
+    }
+  }
+
+  // Save last item
+  if (currentItem?.title) {
+    items.push({
+      title: currentItem.title,
+      whyNow: currentItem.whyNow || '',
+      nextSteps: currentItem.nextSteps || '',
+    });
+  }
+
+  return items;
+}
+
 // ── Simple markdown renderer ─────────────────────────────────────────
-// Converts markdown to HTML for display. Handles: headers, bold, italic,
-// code, blockquotes, lists, links. Not a full parser — good enough for
-// heartbeat outputs.
+
 function renderMarkdown(md: string): string {
   let html = md
-    // Escape HTML
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    // Headers
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
     .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-    // Blockquotes (restore > that we escaped)
     .replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
-    // Bold
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    // Italic
     .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>')
-    // Inline code
     .replace(/`([^`]+)`/g, '<code>$1</code>')
-    // Links
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-    // Unordered lists
     .replace(/^- (.+)$/gm, '<li>$1</li>')
-    // Horizontal rules
     .replace(/^---$/gm, '<hr />')
-    // Paragraphs (double newlines)
     .replace(/\n\n/g, '</p><p>')
-    // Single newlines within paragraphs
     .replace(/\n/g, '<br />');
 
-  // Wrap consecutive <li> in <ul>
   html = html.replace(/(<li>.*?<\/li>(?:<br \/>)?)+/gs, (match) => {
     const cleaned = match.replace(/<br \/>/g, '');
     return `<ul>${cleaned}</ul>`;
   });
 
-  // Wrap in paragraph
   html = `<p>${html}</p>`;
-
-  // Clean up empty paragraphs
   html = html.replace(/<p><\/p>/g, '');
   html = html.replace(/<p>(<h[123]>)/g, '$1');
   html = html.replace(/(<\/h[123]>)<\/p>/g, '$1');
@@ -452,6 +735,125 @@ function renderMarkdown(md: string): string {
   html = html.replace(/(<\/blockquote>)<\/p>/g, '$1');
 
   return html;
+}
+
+// ── REPORT: Stats ────────────────────────────────────────────────────
+
+const reportStats = computed(() => {
+  const now = Date.now();
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const weekStart = new Date();
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+  weekStart.setHours(0, 0, 0, 0);
+
+  const completed = tasks.value.filter(t => t.status === 'complete' || t.status === 'archived');
+  const completedToday = completed.filter(t => t.completed_at && t.completed_at >= todayStart.getTime()).length;
+  const completedWeek = completed.filter(t => t.completed_at && t.completed_at >= weekStart.getTime()).length;
+  const activeNow = tasks.value.filter(t => t.status === 'active').length;
+  const queueDepth = tasks.value.filter(t => t.status === 'queued').length;
+
+  return { completedToday, completedWeek, activeNow, queueDepth };
+});
+
+const recentCompletions = computed(() => {
+  return tasks.value
+    .filter(t => (t.status === 'complete' || t.status === 'archived') && t.completed_at)
+    .sort((a, b) => (b.completed_at || 0) - (a.completed_at || 0))
+    .slice(0, 10);
+});
+
+function refreshReport() {
+  // Trigger re-fetch of tasks to update stats
+  // (tasks are already reactive from useTaskTree)
+}
+
+// ── AGENTS: Helpers ──────────────────────────────────────────────────
+
+// Agent colors for chart (cycle through palette)
+const agentColors = ['#39ff14', '#00e5ff', '#ffee00', '#c084fc', '#ff2d6f', '#ff9500'];
+
+function getAgentColor(idx: number): string {
+  return agentColors[idx % agentColors.length];
+}
+
+const sortedAgents = computed(() => {
+  return [...allAgents.value].sort((a, b) => {
+    // Running first, then by start time descending
+    if (a.status === 'running' && b.status !== 'running') return -1;
+    if (b.status === 'running' && a.status !== 'running') return 1;
+    return b.started_at - a.started_at;
+  });
+});
+
+// Usage bars (simple visualization)
+const usageBars = computed(() => {
+  const bars: { height: number; color: string; label: string }[] = [];
+  const sessions = usage.value?.by_session || [];
+
+  // Generate 24 bars representing rough hourly activity
+  for (let i = 0; i < 24; i++) {
+    const hasActivity = sessions.length > 0 && i > 18; // Placeholder: show recent activity
+    bars.push({
+      height: hasActivity ? 20 + Math.random() * 60 : 5 + Math.random() * 10,
+      color: hasActivity ? '#39ff14' : '#292524',
+      label: `${24 - i}h ago`,
+    });
+  }
+  return bars;
+});
+
+function agentCardClass(agent: AgentInfo): string {
+  switch (agent.status) {
+    case 'running': return 'border-[#39ff14]/30 bg-stone-900/60';
+    case 'completed': return 'border-stone-800/50 bg-stone-900/30';
+    case 'failed': return 'border-red-500/20 bg-stone-900/30';
+    case 'stopped': return 'border-stone-800/50 bg-stone-900/30';
+    default: return 'border-stone-800/50 bg-stone-900/30';
+  }
+}
+
+function agentDotClass(agent: AgentInfo): Record<string, boolean> {
+  return {
+    'bg-[#39ff14] animate-pulse': agent.status === 'running',
+    'bg-[#39ff14]': agent.status === 'completed',
+    'bg-[#ff2d6f]': agent.status === 'failed',
+    'bg-stone-600': agent.status === 'stopped',
+  };
+}
+
+function agentStatusBadgeClass(agent: AgentInfo): string {
+  switch (agent.status) {
+    case 'running': return 'bg-[#39ff14]/10 text-[#39ff14]';
+    case 'completed': return 'bg-stone-800 text-stone-400';
+    case 'failed': return 'bg-red-950/40 text-red-400';
+    case 'stopped': return 'bg-stone-800 text-stone-500';
+    default: return 'bg-stone-800 text-stone-500';
+  }
+}
+
+function agentRuntime(agent: AgentInfo): string {
+  const elapsed = Date.now() - agent.started_at;
+  const mins = Math.floor(elapsed / 60000);
+  if (mins < 1) return '<1m';
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ${mins % 60}m`;
+}
+
+function agentNeedsAttention(agent: AgentInfo): boolean {
+  if (agent.status !== 'running') return false;
+  // Stalled if no output in last 5 minutes
+  const elapsed = Date.now() - agent.started_at;
+  return elapsed > 300000 && agent.output_tail.length === 0;
+}
+
+async function handleStopAgent(pid: number) {
+  try {
+    await stopAgentFn(pid);
+  } catch (e: any) {
+    console.error('Failed to stop agent:', e);
+  }
 }
 
 // ── Filtering ──────────────────────────────────────────────────────────
@@ -485,7 +887,7 @@ function clearFilters() {
   activeTagFilters.clear();
 }
 
-// Status filter definitions — new names + neon colors
+// Status filter definitions
 const filterOptions = computed(() => {
   const counts: Record<string, number> = {};
   for (const t of tasks.value) {
@@ -541,14 +943,12 @@ const filteredTasks = computed(() => {
   return result;
 });
 
-// ── Create form ────────────────────────────────────────────────────────
+// ── Create form (status always queued) ─────────────────────────────────
 
 const showCreateForm = ref(false);
 const titleInput = ref<HTMLInputElement | null>(null);
 const newTaskTitle = ref('');
-const newTaskDescription = ref('');
 const newTaskPriority = ref<TaskPriority>('P2');
-const newTaskStatus = ref<TaskStatus>('queued');
 const newTaskTagsRaw = ref('');
 
 async function toggleCreateForm() {
@@ -572,16 +972,13 @@ async function handleCreateTask() {
     await createTask({
       title,
       priority: newTaskPriority.value,
-      status: newTaskStatus.value,
-      description: newTaskDescription.value.trim() || undefined,
+      status: 'queued', // Always queued for new items
       tags: tags.length > 0 ? tags : undefined,
     });
     // Reset form
     newTaskTitle.value = '';
-    newTaskDescription.value = '';
     newTaskTagsRaw.value = '';
     newTaskPriority.value = 'P2';
-    newTaskStatus.value = 'queued';
     showCreateForm.value = false;
   } catch (e: any) {
     console.error('Failed to create task:', e);
@@ -622,6 +1019,12 @@ async function handleReorder(id: string, sortOrder: number) {
   }
 }
 
+// ── Formatters ──────────────────────────────────────────────────────────
+
+function formatDate(ts: number): string {
+  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 // ── Keyboard navigation ─────────────────────────────────────────────
 
 const focusedIndex = ref(-1);
@@ -654,7 +1057,7 @@ function handleKeyNav(e: KeyboardEvent) {
         e.preventDefault();
         const el = taskRowRefs[focusedIndex.value];
         if (el) {
-          const clickTarget = el.querySelector('.flex.items-center.gap-2\\.5') as HTMLElement;
+          const clickTarget = el.querySelector('.flex.items-center.gap-2') as HTMLElement;
           if (clickTarget) clickTarget.click();
         }
       }
