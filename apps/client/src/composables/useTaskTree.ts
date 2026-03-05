@@ -8,6 +8,7 @@ export function useTaskTree() {
   const error = ref<string | null>(null);
   let ws: WebSocket | null = null;
   let lastUpdateTs = 0; // Track when we last did an in-place update
+  let wsDebouncedFetch: ReturnType<typeof setTimeout> | null = null;
 
   async function fetchTasks() {
     loading.value = true;
@@ -40,6 +41,9 @@ export function useTaskTree() {
     const body: any = { ...updates };
     if (editSessionId) body._edit_session_id = editSessionId;
 
+    // Mark BEFORE sending — prevents race where WS broadcast arrives before PUT response
+    lastUpdateTs = Date.now();
+
     const res = await fetch(`${API_BASE_URL}/tasks/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -48,7 +52,7 @@ export function useTaskTree() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const updated: Task = await res.json();
 
-    // Optimistic in-place update (preserves scroll position — no full refetch)
+    // In-place patch (preserves scroll position — no full refetch)
     function patchInPlace(list: Task[]): boolean {
       for (let i = 0; i < list.length; i++) {
         if (list[i].id === id) {
@@ -61,7 +65,7 @@ export function useTaskTree() {
       return false;
     }
     patchInPlace(tasks.value);
-    lastUpdateTs = Date.now();
+    lastUpdateTs = Date.now(); // Refresh guard window after patch too
 
     return updated;
   }
@@ -111,10 +115,15 @@ export function useTaskTree() {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'task_update' || msg.type === 'task_archived' || msg.type === 'task_rejected') {
-          // Skip full refetch if we just did an in-place update (<500ms ago)
-          // This prevents scroll-resetting double-fetches
-          if (Date.now() - lastUpdateTs < 500) return;
-          fetchTasks();
+          // Skip if we just did a local update (race: WS arrives before PUT response)
+          if (Date.now() - lastUpdateTs < 2000) return;
+
+          // Debounce: coalesce rapid WS messages into a single refetch
+          if (wsDebouncedFetch) clearTimeout(wsDebouncedFetch);
+          wsDebouncedFetch = setTimeout(() => {
+            wsDebouncedFetch = null;
+            fetchTasks();
+          }, 300);
         }
       } catch {
         // ignore parse errors

@@ -83,6 +83,7 @@ export interface Task {
   fit_score: number;
   time_score: number;
   cost_score: number;
+  urgent_score: number;
   estimated_tokens: number | null;
   actual_tokens: number;
   estimated_minutes: number | null;
@@ -117,6 +118,12 @@ export interface ClaudeUsage {
 
 // ── Agent Types ──────────────────────────────────────────────────────────
 
+export interface AgentProgressSignal {
+  phase: string;
+  detail: string;
+  timestamp: number;
+}
+
 export interface AgentInfo {
   pid: number;
   task_id: string;
@@ -128,6 +135,25 @@ export interface AgentInfo {
   exit_code: number | null;
   output_tail: string[];
   prompt_summary: string;
+  // Enhanced tracking
+  last_output_at: number | null;
+  output_line_count: number;
+  detected_phase: string;
+  tools_used: string[];
+  files_touched: string[];
+  errors: string[];
+  is_stalled: boolean;
+  estimated_duration_ms: number | null;
+  progress_signals: AgentProgressSignal[];
+}
+
+export interface AgentDetail {
+  full_prompt: string;
+  output_tail: string[];
+  progress_signals: AgentProgressSignal[];
+  tools_used: string[];
+  files_touched: string[];
+  errors: string[];
 }
 
 export interface AgentStats {

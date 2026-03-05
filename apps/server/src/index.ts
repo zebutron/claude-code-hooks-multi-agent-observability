@@ -1,4 +1,4 @@
-import { initDatabase, insertEvent, getFilterOptions, getRecentEvents, updateEventHITLResponse } from './db';
+import { initDatabase, insertEvent, getFilterOptions, getRecentEvents, updateEventHITLResponse, getUsageTimeseries, storeUsageSnapshot, getUsageSnapshots, insertDelegationLog, getDelegationBudget, getDelegationOutcomes, getDelegationConfig, updateDelegationConfig } from './db';
 import type { HookEvent, HumanInTheLoopResponse } from './types';
 import {
   createTheme,
@@ -43,11 +43,17 @@ import {
   spawnAgent,
   listAgents,
   getAgent,
+  getAgentDetail,
   stopAgent,
+  dismissAgent,
   cleanupFinishedAgents,
   getAgentStats,
+  setOnAgentOutputChange,
+  loadPersistedAgents,
   type SpawnOptions,
+  type AgentInfo,
 } from './agents';
+import { enrichTask } from './enrich';
 import {
   initHeartbeat,
   getHeartbeatOutputs,
@@ -59,6 +65,9 @@ import {
 
 // Initialize database
 initDatabase();
+
+// Restore persisted agent records from SQLite (survives server restarts)
+loadPersistedAgents();
 
 // Initialize resource lock system (uses same DB file path pattern)
 import { Database } from 'bun:sqlite';
@@ -72,6 +81,16 @@ const wsClients = new Set<any>();
 initHeartbeat();
 setOnPulseComplete((result) => {
   const msg = JSON.stringify({ type: 'heartbeat_pulse_complete', data: result });
+  for (const client of wsClients) {
+    try { client.send(msg); } catch {}
+  }
+});
+
+// Wire up agent output change → WebSocket broadcast
+setOnAgentOutputChange((agent: AgentInfo) => {
+  // Send a lightweight snapshot (exclude full_prompt to save bandwidth)
+  const { full_prompt, ...snapshot } = agent;
+  const msg = JSON.stringify({ type: 'agent_output', data: snapshot });
   for (const client of wsClients) {
     try { client.send(msg); } catch {}
   }
@@ -493,6 +512,21 @@ const server = Bun.serve({
       });
     }
 
+    // POST /tasks/:id/enrich - AI-assisted enrichment suggestions (does NOT modify the task)
+    if (url.pathname.match(/^\/tasks\/[^\/]+\/enrich$/) && req.method === 'POST') {
+      const id = url.pathname.split('/')[2];
+      const result = await enrichTask(id);
+      if ('error' in result) {
+        return new Response(JSON.stringify(result), {
+          status: 503,
+          headers: { ...headers, 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify(result), {
+        headers: { ...headers, 'Content-Type': 'application/json' },
+      });
+    }
+
     // GET /tasks/:id - Single task with children
     if (url.pathname.match(/^\/tasks\/[^\/]+$/) && req.method === 'GET') {
       const id = url.pathname.split('/')[2];
@@ -790,6 +824,21 @@ const server = Bun.serve({
       });
     }
 
+    // GET /agents/:pid/detail - Full prompt + output + signals
+    if (url.pathname.match(/^\/agents\/\d+\/detail$/) && req.method === 'GET') {
+      const pid = parseInt(url.pathname.split('/')[2]);
+      const detail = getAgentDetail(pid);
+      if (!detail) {
+        return new Response(JSON.stringify({ error: 'Agent not found' }), {
+          status: 404,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify(detail), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
     // POST /agents/:pid/stop - Stop a running agent
     if (url.pathname.match(/^\/agents\/\d+\/stop$/) && req.method === 'POST') {
       const pid = parseInt(url.pathname.split('/')[2]);
@@ -814,10 +863,96 @@ const server = Bun.serve({
       });
     }
 
-    // POST /agents/cleanup - Remove finished agent records older than 1 hour
+    // POST /agents/:pid/dismiss - Remove a finished agent from the list (human reviewed it)
+    if (url.pathname.match(/^\/agents\/\d+\/dismiss$/) && req.method === 'POST') {
+      const pid = parseInt(url.pathname.split('/')[2]);
+      const dismissed = dismissAgent(pid);
+
+      if (!dismissed) {
+        return new Response(JSON.stringify({ error: 'Agent not found or still running' }), {
+          status: 404,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Broadcast agent dismissed
+      const message = JSON.stringify({ type: 'agent_dismissed', data: { pid } });
+      wsClients.forEach(client => {
+        try { client.send(message); } catch { wsClients.delete(client); }
+      });
+
+      return new Response(JSON.stringify({ dismissed: true, pid }), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // POST /agents/cleanup - Safety net cleanup for very old agents (24h+)
     if (url.pathname === '/agents/cleanup' && req.method === 'POST') {
       const cleaned = cleanupFinishedAgents();
       return new Response(JSON.stringify({ cleaned }), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // ── Delegation Budget & Outcomes API ────────────────────────────────
+
+    // GET /delegation/budget — Resource check before spawning
+    if (url.pathname === '/delegation/budget' && req.method === 'GET') {
+      const budget = getDelegationBudget();
+      return new Response(JSON.stringify(budget), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // GET /delegation/outcomes — Past delegation results for adaptive scaling
+    if (url.pathname === '/delegation/outcomes' && req.method === 'GET') {
+      const days = parseInt(url.searchParams.get('days') || '7');
+      const outcomes = getDelegationOutcomes(days);
+      return new Response(JSON.stringify(outcomes), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // POST /delegation/log — Record a delegation decision
+    if (url.pathname === '/delegation/log' && req.method === 'POST') {
+      const body = await req.json() as any;
+      if (!body.task_id || !body.task_title) {
+        return new Response(JSON.stringify({ error: 'task_id and task_title required' }), {
+          status: 400, headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+      const id = insertDelegationLog({
+        task_id: body.task_id,
+        task_title: body.task_title,
+        agent_pid: body.agent_pid || null,
+        model: body.model || null,
+        spawned_at: Date.now(),
+        error_summary: body.error_summary || null,
+        heartbeat_run: body.heartbeat_run || null,
+      });
+      return new Response(JSON.stringify({ id }), {
+        status: 201, headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // GET /delegation/config — Read current delegation config
+    if (url.pathname === '/delegation/config' && req.method === 'GET') {
+      const config = getDelegationConfig();
+      return new Response(JSON.stringify(config), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // PUT /delegation/config — Update delegation config
+    if (url.pathname === '/delegation/config' && req.method === 'PUT') {
+      const body = await req.json() as any;
+      if (!body.key || body.value === undefined) {
+        return new Response(JSON.stringify({ error: 'key and value required' }), {
+          status: 400, headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+      updateDelegationConfig(body.key, String(body.value));
+      return new Response(JSON.stringify({ updated: true, key: body.key, value: body.value }), {
         headers: { ...headers, 'Content-Type': 'application/json' }
       });
     }
@@ -832,6 +967,19 @@ const server = Bun.serve({
       });
     }
 
+    // GET /usage/timeseries — bucketed event counts for activity chart
+    if (url.pathname === '/usage/timeseries' && req.method === 'GET') {
+      const lookbackH = parseInt(url.searchParams.get('hours') || '6');
+      const bucketMin = parseInt(url.searchParams.get('bucket') || '5');
+      const timeseries = getUsageTimeseries(
+        lookbackH * 60 * 60 * 1000,
+        bucketMin * 60 * 1000,
+      );
+      return new Response(JSON.stringify(timeseries), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
     // POST /usage/claude — receive real Claude usage data from bridge script
     if (url.pathname === '/usage/claude' && req.method === 'POST') {
       try {
@@ -841,6 +989,9 @@ const server = Bun.serve({
           ...data,
           cached_at: Date.now(),
         };
+
+        // Persist snapshot to DB for timeseries history
+        try { storeUsageSnapshot(data); } catch {}
 
         // Broadcast to WS clients
         const message = JSON.stringify({ type: 'claude_usage', data: (globalThis as any).__claude_usage_cache });
@@ -863,6 +1014,15 @@ const server = Bun.serve({
     if (url.pathname === '/usage/claude' && req.method === 'GET') {
       const cached = (globalThis as any).__claude_usage_cache || null;
       return new Response(JSON.stringify(cached), {
+        headers: { ...headers, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // GET /usage/snapshots — historical usage cap data for timeseries
+    if (url.pathname === '/usage/snapshots' && req.method === 'GET') {
+      const hours = parseInt(url.searchParams.get('hours') || '24');
+      const snapshots = getUsageSnapshots(hours * 60 * 60 * 1000);
+      return new Response(JSON.stringify(snapshots), {
         headers: { ...headers, 'Content-Type': 'application/json' }
       });
     }

@@ -64,7 +64,21 @@ export function initDatabase(): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_session_id ON events(session_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_hook_event_type ON events(hook_event_type)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_timestamp ON events(timestamp)');
-  
+
+  // ── Usage snapshots table (real Anthropic cap data from bridge) ──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS usage_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp INTEGER NOT NULL,
+      five_hour_pct REAL,
+      five_hour_resets_at TEXT,
+      seven_day_pct REAL,
+      seven_day_resets_at TEXT,
+      seven_day_sonnet_pct REAL
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_usage_snapshots_ts ON usage_snapshots(timestamp)');
+
   // Create themes table
   db.exec(`
     CREATE TABLE IF NOT EXISTS themes (
@@ -177,6 +191,9 @@ export function initDatabase(): void {
     if (!taskCols.some((c: any) => c.name === 'cost_score')) {
       db.exec("ALTER TABLE tasks ADD COLUMN cost_score INTEGER DEFAULT 0");
     }
+    if (!taskCols.some((c: any) => c.name === 'urgent_score')) {
+      db.exec("ALTER TABLE tasks ADD COLUMN urgent_score INTEGER DEFAULT 0");
+    }
   } catch { /* table may not exist yet */ }
 
   // ── Command Center: Task Audit Log ────────────────────────────────────
@@ -224,6 +241,73 @@ export function initDatabase(): void {
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage_log(timestamp)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_log(session_id)');
+
+  // ── Agent Runs table (persists agent records across server restarts) ──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agent_runs (
+      pid INTEGER PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      task_title TEXT NOT NULL,
+      project_dir TEXT NOT NULL,
+      model TEXT,
+      started_at INTEGER NOT NULL,
+      finished_at INTEGER,
+      status TEXT NOT NULL DEFAULT 'running',
+      exit_code INTEGER,
+      output_tail TEXT DEFAULT '[]',
+      prompt_summary TEXT,
+      full_prompt TEXT,
+      detected_phase TEXT DEFAULT 'initializing',
+      tools_used TEXT DEFAULT '[]',
+      files_touched TEXT DEFAULT '[]',
+      errors TEXT DEFAULT '[]',
+      progress_signals TEXT DEFAULT '[]',
+      output_line_count INTEGER DEFAULT 0,
+      dismissed INTEGER DEFAULT 0
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_runs_task ON agent_runs(task_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_agent_runs_dismissed ON agent_runs(dismissed)');
+
+  // ── Delegation Log (tracks every delegation decision + outcome) ──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS delegation_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL,
+      task_title TEXT NOT NULL,
+      agent_pid INTEGER,
+      model TEXT,
+      spawned_at INTEGER NOT NULL,
+      completed_at INTEGER,
+      outcome TEXT DEFAULT 'pending',
+      duration_ms INTEGER,
+      error_summary TEXT,
+      heartbeat_run TEXT
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_delegation_log_spawned ON delegation_log(spawned_at)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_delegation_log_outcome ON delegation_log(outcome)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_delegation_log_pid ON delegation_log(agent_pid)');
+
+  // ── Delegation Config (tunable limits, singleton rows) ──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS delegation_config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
+  // Seed default config values if not present
+  const seedConfig = db.prepare(
+    'INSERT OR IGNORE INTO delegation_config (key, value, updated_at) VALUES (?, ?, ?)'
+  );
+  const now = Date.now();
+  seedConfig.run('max_concurrent_workers', '5', now);
+  seedConfig.run('max_daily_spawns', '20', now);
+  seedConfig.run('usage_headroom_min_pct', '20', now);
+  seedConfig.run('cooldown_after_failures_ms', '300000', now);
 }
 
 export function insertEvent(event: HookEvent): HookEvent {
@@ -271,6 +355,124 @@ export function getFilterOptions(): FilterOptions {
     session_ids: sessionIds.map(row => row.session_id),
     hook_event_types: hookEventTypes.map(row => row.hook_event_type)
   };
+}
+
+// ── Usage Timeseries ──────────────────────────────────────────────────
+
+export interface TimeseriesBucket {
+  timestamp: number;       // bucket start (ms)
+  total: number;           // total events
+  tool_uses: number;       // PreToolUse + PostToolUse
+  sessions: number;        // SessionStart count
+}
+
+/**
+ * Returns event counts bucketed by interval over a lookback window.
+ * Default: 5-minute buckets over last 6 hours (72 bars).
+ */
+export function getUsageTimeseries(
+  lookbackMs: number = 6 * 60 * 60 * 1000,
+  bucketMs: number = 5 * 60 * 1000,
+): TimeseriesBucket[] {
+  const now = Date.now();
+  const cutoff = now - lookbackMs;
+  const numBuckets = Math.ceil(lookbackMs / bucketMs);
+
+  // Initialize all buckets (so gaps show as 0)
+  const buckets: TimeseriesBucket[] = [];
+  const bucketStart = Math.floor(cutoff / bucketMs) * bucketMs;
+  for (let i = 0; i < numBuckets; i++) {
+    buckets.push({
+      timestamp: bucketStart + i * bucketMs,
+      total: 0,
+      tool_uses: 0,
+      sessions: 0,
+    });
+  }
+
+  // Use SQL aggregation for efficiency
+  const rows = db.prepare(`
+    SELECT
+      (timestamp / ? * ?) AS bucket_ts,
+      COUNT(*) AS total,
+      SUM(CASE WHEN hook_event_type IN ('PreToolUse', 'PostToolUse') THEN 1 ELSE 0 END) AS tool_uses,
+      SUM(CASE WHEN hook_event_type = 'SessionStart' THEN 1 ELSE 0 END) AS sessions
+    FROM events
+    WHERE timestamp >= ?
+    GROUP BY bucket_ts
+    ORDER BY bucket_ts
+  `).all(bucketMs, bucketMs, cutoff) as any[];
+
+  // Merge SQL results into pre-initialized buckets
+  const bucketMap = new Map<number, TimeseriesBucket>();
+  for (const b of buckets) bucketMap.set(b.timestamp, b);
+  for (const row of rows) {
+    const b = bucketMap.get(row.bucket_ts);
+    if (b) {
+      b.total = row.total;
+      b.tool_uses = row.tool_uses;
+      b.sessions = row.sessions;
+    }
+  }
+
+  return buckets;
+}
+
+// ── Usage Snapshots (real Anthropic cap data) ────────────────────────
+
+export interface UsageSnapshot {
+  timestamp: number;
+  five_hour_pct: number | null;
+  five_hour_resets_at: string | null;
+  seven_day_pct: number | null;
+  seven_day_resets_at: string | null;
+  seven_day_sonnet_pct: number | null;
+}
+
+/**
+ * Store a usage snapshot from the bridge. Deduplicates if values haven't changed
+ * in the last 5 minutes (avoids storing identical readings).
+ */
+export function storeUsageSnapshot(data: {
+  five_hour?: { utilization: number; resets_at: string } | null;
+  seven_day?: { utilization: number; resets_at: string } | null;
+  seven_day_sonnet?: { utilization: number; resets_at: string | null } | null;
+}): void {
+  const now = Date.now();
+  const fiveHourPct = data.five_hour?.utilization ?? null;
+  const sevenDayPct = data.seven_day?.utilization ?? null;
+  const sonnetPct = data.seven_day_sonnet?.utilization ?? null;
+
+  // Deduplicate: skip if identical reading within last 5 minutes
+  const recent = db.prepare(
+    'SELECT five_hour_pct, seven_day_pct FROM usage_snapshots ORDER BY timestamp DESC LIMIT 1'
+  ).get() as any;
+  if (recent && recent.five_hour_pct === fiveHourPct && recent.seven_day_pct === sevenDayPct) {
+    const lastTs = (db.prepare('SELECT MAX(timestamp) as ts FROM usage_snapshots').get() as any)?.ts || 0;
+    if (now - lastTs < 5 * 60 * 1000) return; // Skip duplicate within 5 min
+  }
+
+  db.prepare(`
+    INSERT INTO usage_snapshots (timestamp, five_hour_pct, five_hour_resets_at, seven_day_pct, seven_day_resets_at, seven_day_sonnet_pct)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    now,
+    fiveHourPct,
+    data.five_hour?.resets_at ?? null,
+    sevenDayPct,
+    data.seven_day?.resets_at ?? null,
+    sonnetPct,
+  );
+}
+
+/**
+ * Get usage snapshots for timeseries chart. Default: last 24 hours.
+ */
+export function getUsageSnapshots(lookbackMs: number = 24 * 60 * 60 * 1000): UsageSnapshot[] {
+  const cutoff = Date.now() - lookbackMs;
+  return db.prepare(
+    'SELECT timestamp, five_hour_pct, five_hour_resets_at, seven_day_pct, seven_day_resets_at, seven_day_sonnet_pct FROM usage_snapshots WHERE timestamp >= ? ORDER BY timestamp'
+  ).all(cutoff) as UsageSnapshot[];
 }
 
 export function getRecentEvents(limit: number = 300): HookEvent[] {
@@ -486,6 +688,223 @@ export function updateEventHITLResponse(id: number, response: any): HookEvent | 
     humanInTheLoopStatus: row.humanInTheLoopStatus ? JSON.parse(row.humanInTheLoopStatus) : undefined,
     model_name: row.model_name || undefined
   };
+}
+
+// ── Delegation Log & Budget ───────────────────────────────────────────
+
+export interface DelegationLogEntry {
+  id?: number;
+  task_id: string;
+  task_title: string;
+  agent_pid: number | null;
+  model: string | null;
+  spawned_at: number;
+  completed_at: number | null;
+  outcome: 'pending' | 'success' | 'failed' | 'stalled' | 'stopped';
+  duration_ms: number | null;
+  error_summary: string | null;
+  heartbeat_run: string | null;
+}
+
+export function insertDelegationLog(entry: Omit<DelegationLogEntry, 'id' | 'completed_at' | 'duration_ms' | 'outcome'>): number {
+  const result = db.prepare(`
+    INSERT INTO delegation_log (task_id, task_title, agent_pid, model, spawned_at, outcome, error_summary, heartbeat_run)
+    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+  `).run(
+    entry.task_id,
+    entry.task_title,
+    entry.agent_pid,
+    entry.model,
+    entry.spawned_at,
+    entry.error_summary || null,
+    entry.heartbeat_run || null,
+  );
+  return result.lastInsertRowid as number;
+}
+
+export function resolveDelegationLog(
+  agentPid: number,
+  outcome: 'success' | 'failed' | 'stalled' | 'stopped',
+  errorSummary?: string,
+): void {
+  const now = Date.now();
+  const row = db.prepare(
+    'SELECT id, spawned_at FROM delegation_log WHERE agent_pid = ? AND outcome = ? ORDER BY spawned_at DESC LIMIT 1'
+  ).get(agentPid, 'pending') as any;
+
+  if (!row) return; // No pending log entry for this agent
+
+  db.prepare(`
+    UPDATE delegation_log SET outcome = ?, completed_at = ?, duration_ms = ?, error_summary = COALESCE(?, error_summary)
+    WHERE id = ?
+  `).run(outcome, now, now - row.spawned_at, errorSummary || null, row.id);
+}
+
+function getConfigValue(key: string): string | null {
+  const row = db.prepare('SELECT value FROM delegation_config WHERE key = ?').get(key) as any;
+  return row?.value ?? null;
+}
+
+function getConfigInt(key: string, fallback: number): number {
+  const val = getConfigValue(key);
+  return val !== null ? parseInt(val, 10) : fallback;
+}
+
+export interface DelegationBudget {
+  max_concurrent: number;
+  running_now: number;
+  available_slots: number;
+  daily_spawns: number;
+  daily_limit: number;
+  daily_remaining: number;
+  success_rate_7d: number;
+  total_delegations_7d: number;
+  usage_headroom_pct: number | null;  // null if no usage data available
+  recommendation: 'spawn_ok' | 'slow_down' | 'hold';
+}
+
+export function getDelegationBudget(): DelegationBudget {
+  const maxConcurrent = getConfigInt('max_concurrent_workers', 5);
+  const dailyLimit = getConfigInt('max_daily_spawns', 20);
+  const headroomMin = getConfigInt('usage_headroom_min_pct', 20);
+
+  // Count running agents from agent_runs table
+  const runningRow = db.prepare(
+    "SELECT COUNT(*) as cnt FROM agent_runs WHERE status = 'running' AND dismissed = 0"
+  ).get() as any;
+  const runningNow = runningRow?.cnt ?? 0;
+
+  // Count today's spawns
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const dailyRow = db.prepare(
+    'SELECT COUNT(*) as cnt FROM delegation_log WHERE spawned_at >= ?'
+  ).get(todayStart.getTime()) as any;
+  const dailySpawns = dailyRow?.cnt ?? 0;
+
+  // 7-day success rate
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const weekRows = db.prepare(
+    "SELECT outcome, COUNT(*) as cnt FROM delegation_log WHERE spawned_at >= ? AND outcome != 'pending' GROUP BY outcome"
+  ).all(weekAgo) as any[];
+
+  let total7d = 0;
+  let success7d = 0;
+  for (const r of weekRows) {
+    total7d += r.cnt;
+    if (r.outcome === 'success') success7d += r.cnt;
+  }
+  const successRate = total7d > 0 ? success7d / total7d : 1.0; // default optimistic
+
+  // Adaptive scaling: adjust limits based on success rate
+  if (total7d >= 5 && successRate > 0.8) {
+    // Ramp up
+    const newMax = Math.min(maxConcurrent + 1, 8);
+    const newDaily = Math.min(dailyLimit + 2, 30);
+    if (newMax !== maxConcurrent) updateDelegationConfig('max_concurrent_workers', String(newMax));
+    if (newDaily !== dailyLimit) updateDelegationConfig('max_daily_spawns', String(newDaily));
+  } else if (total7d >= 3 && successRate < 0.5) {
+    // Ramp down
+    const newMax = Math.max(maxConcurrent - 1, 1);
+    const newDaily = Math.max(dailyLimit - 2, 3);
+    if (newMax !== maxConcurrent) updateDelegationConfig('max_concurrent_workers', String(newMax));
+    if (newDaily !== dailyLimit) updateDelegationConfig('max_daily_spawns', String(newDaily));
+  }
+
+  // Re-read after potential adaptive changes
+  const effectiveMax = getConfigInt('max_concurrent_workers', 5);
+  const effectiveDaily = getConfigInt('max_daily_spawns', 20);
+
+  const availableSlots = Math.max(0, effectiveMax - runningNow);
+  const dailyRemaining = Math.max(0, effectiveDaily - dailySpawns);
+
+  // Usage headroom from latest snapshot
+  const latestUsage = db.prepare(
+    'SELECT five_hour_pct FROM usage_snapshots ORDER BY timestamp DESC LIMIT 1'
+  ).get() as any;
+  const usageHeadroom = latestUsage?.five_hour_pct != null
+    ? Math.round(100 - latestUsage.five_hour_pct)
+    : null;
+
+  // Recommendation
+  let recommendation: 'spawn_ok' | 'slow_down' | 'hold' = 'spawn_ok';
+  if (availableSlots <= 0 || dailyRemaining <= 0 || (usageHeadroom !== null && usageHeadroom < headroomMin)) {
+    recommendation = 'hold';
+  } else if (availableSlots === 1 || dailyRemaining <= 2 || (usageHeadroom !== null && usageHeadroom < 40)) {
+    recommendation = 'slow_down';
+  }
+
+  return {
+    max_concurrent: effectiveMax,
+    running_now: runningNow,
+    available_slots: availableSlots,
+    daily_spawns: dailySpawns,
+    daily_limit: effectiveDaily,
+    daily_remaining: dailyRemaining,
+    success_rate_7d: Math.round(successRate * 100) / 100,
+    total_delegations_7d: total7d,
+    usage_headroom_pct: usageHeadroom,
+    recommendation,
+  };
+}
+
+export interface DelegationOutcomes {
+  total: number;
+  successful: number;
+  failed: number;
+  stalled: number;
+  stopped: number;
+  pending: number;
+  avg_duration_ms: number | null;
+  recent_failures: Array<{ task_id: string; task_title: string; error: string | null; when: number }>;
+}
+
+export function getDelegationOutcomes(days: number = 7): DelegationOutcomes {
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+
+  const rows = db.prepare(
+    "SELECT outcome, COUNT(*) as cnt FROM delegation_log WHERE spawned_at >= ? GROUP BY outcome"
+  ).all(cutoff) as any[];
+
+  const counts: Record<string, number> = { pending: 0, success: 0, failed: 0, stalled: 0, stopped: 0 };
+  for (const r of rows) counts[r.outcome] = r.cnt;
+
+  const avgRow = db.prepare(
+    "SELECT AVG(duration_ms) as avg_dur FROM delegation_log WHERE spawned_at >= ? AND outcome != 'pending' AND duration_ms IS NOT NULL"
+  ).get(cutoff) as any;
+
+  const failures = db.prepare(
+    "SELECT task_id, task_title, error_summary, completed_at FROM delegation_log WHERE spawned_at >= ? AND outcome = 'failed' ORDER BY completed_at DESC LIMIT 10"
+  ).all(cutoff) as any[];
+
+  return {
+    total: Object.values(counts).reduce((a, b) => a + b, 0),
+    successful: counts.success,
+    failed: counts.failed,
+    stalled: counts.stalled,
+    stopped: counts.stopped,
+    pending: counts.pending,
+    avg_duration_ms: avgRow?.avg_dur ? Math.round(avgRow.avg_dur) : null,
+    recent_failures: failures.map((f: any) => ({
+      task_id: f.task_id,
+      task_title: f.task_title,
+      error: f.error_summary,
+      when: f.completed_at,
+    })),
+  };
+}
+
+export function getDelegationConfig(): Record<string, string> {
+  const rows = db.prepare('SELECT key, value FROM delegation_config').all() as any[];
+  const config: Record<string, string> = {};
+  for (const r of rows) config[r.key] = r.value;
+  return config;
+}
+
+export function updateDelegationConfig(key: string, value: string): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO delegation_config (key, value, updated_at) VALUES (?, ?, ?)'
+  ).run(key, value, Date.now());
 }
 
 export { db };

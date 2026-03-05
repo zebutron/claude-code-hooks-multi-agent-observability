@@ -68,14 +68,14 @@ const dropdownStyle = computed(() => {
 
 function scoreColor(v: number): string {
   if (props.highIsGood) {
-    // High = good (green), low = bad (red). IMPACT, FIT
+    // High = good (green), low = bad (red). FIT, IMPACT, URGENCY
     if (v >= 8) return 'text-emerald-400';
     if (v >= 6) return 'text-lime-300';
     if (v >= 4) return 'text-stone-300';
     if (v >= 2) return 'text-orange-400';
     return 'text-red-400';
   } else {
-    // High = bad (red), low = good (green). TIME, COST, RISK
+    // High = bad (red), low = good (green). LENGTH, COST, RISK
     if (v >= 8) return 'text-red-400';
     if (v >= 6) return 'text-orange-400';
     if (v >= 4) return 'text-stone-300';

@@ -27,10 +27,24 @@
         </button>
       </div>
 
-      <!-- Usage Meter + Resource Locks (STACK tab only) -->
+      <!-- Usage Meter + Sort (STACK tab only) -->
       <div v-if="activeTab === 'prio'" class="px-4 py-2 flex items-center gap-4">
         <UsageMeter :usage="usage" :claude-usage="claudeUsage" class="flex-1" />
-        <ResourceLocks />
+        <select
+          v-model="sortBy"
+          class="px-2 py-0.5 text-[10px] rounded bg-stone-800 border border-stone-700/50 text-stone-400 focus:outline-none focus:border-stone-500 cursor-pointer"
+        >
+          <option value="status">Sort: Status</option>
+          <option value="priority">Sort: Priority</option>
+          <option value="created">Sort: Created</option>
+          <option value="updated">Sort: Updated</option>
+          <option value="fit_score">Sort: Fit</option>
+          <option value="roi_score">Sort: Impact</option>
+          <option value="urgent_score">Sort: Urgency</option>
+          <option value="time_score">Sort: Length</option>
+          <option value="cost_score">Sort: Cost</option>
+          <option value="risk_score">Sort: Risk</option>
+        </select>
       </div>
 
       <!-- Status filter chips + Tag filters (only on prio tab) -->
@@ -64,6 +78,7 @@
         >
           <span class="text-[10px]">{{ showTagFilters ? '▴' : '▾' }}</span>
         </button>
+
       </div>
       <!-- Tag filter chips (collapsible, hidden by default) -->
       <div v-if="activeTab === 'prio' && showTagFilters && allTags.length" class="px-4 pb-2 flex items-center gap-1.5 flex-wrap">
@@ -113,26 +128,6 @@
             @keydown.enter.exact="handleCreateTask"
             @keydown.escape="showCreateForm = false"
           />
-        </div>
-        <!-- Extra fields (collapsed until title has content) -->
-        <div v-if="newTaskTitle.trim()" class="px-3 pb-2 flex flex-wrap gap-2 items-center border-t border-stone-800/30 pt-2">
-          <select v-model="newTaskPriority" class="px-2 py-1 text-[10px] rounded bg-stone-950 border border-stone-700/50 text-stone-300">
-            <option v-for="n in 10" :key="n-1" :value="'P'+(n-1)">P{{ n-1 }}</option>
-          </select>
-          <input
-            v-model="newTaskTagsRaw"
-            type="text"
-            placeholder="Tags..."
-            class="flex-1 min-w-[100px] px-2 py-1 text-[10px] rounded bg-stone-950 border border-stone-700/50 text-stone-300 placeholder-stone-600 focus:outline-none"
-            @keydown.escape="showCreateForm = false"
-          />
-          <button
-            @click="handleCreateTask"
-            :disabled="!newTaskTitle.trim()"
-            class="px-3 py-1 text-[10px] font-semibold rounded bg-stone-200 hover:bg-white disabled:bg-stone-700 disabled:text-stone-500 text-stone-900 transition-colors"
-          >
-            Create
-          </button>
         </div>
       </div>
 
@@ -391,57 +386,107 @@
     <!-- ═══ AGENTS TAB ═══ -->
     <div v-if="activeTab === 'agents'" class="flex-1 flex flex-col overflow-hidden">
 
-      <!-- Usage timeseries chart -->
-      <div class="px-4 py-3 border-b border-stone-800 bg-stone-900/50">
-        <div class="flex items-center justify-between mb-2">
-          <div class="text-[9px] font-bold text-stone-600 uppercase tracking-wider">Usage Velocity</div>
-          <UsageMeter :usage="usage" :claude-usage="claudeUsage" class="flex-shrink-0" />
-        </div>
-        <!-- Simple usage bars (timeseries placeholder until we have more data) -->
-        <div class="h-16 flex items-end gap-0.5">
+      <!-- Usage velocity timeseries -->
+      <div class="px-4 pt-3 pb-2 border-b border-stone-800 bg-stone-900/50">
+        <div class="h-16 flex items-end gap-px">
           <div
-            v-for="(bar, i) in usageBars"
+            v-for="(bar, i) in activityBars"
             :key="i"
-            class="flex-1 rounded-t transition-all duration-300"
+            class="flex-1 rounded-t transition-all duration-300 relative group"
             :style="{ height: bar.height + '%', backgroundColor: bar.color }"
             :title="bar.label"
-          />
+          >
+            <!-- Tooltip on hover -->
+            <div class="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-1.5 py-0.5 bg-stone-800 rounded text-[8px] text-stone-300 whitespace-nowrap z-10 pointer-events-none">
+              {{ bar.label }}
+            </div>
+          </div>
         </div>
         <div class="flex justify-between text-[8px] text-stone-600 mt-1">
-          <span>24h ago</span>
+          <span>6h ago</span>
           <span>Now</span>
         </div>
       </div>
 
       <!-- Agent list -->
-      <div class="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+      <div class="flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
         <!-- No agents -->
         <div v-if="allAgents.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
-          <div class="text-4xl mb-3">🤖</div>
-          <div class="text-lg text-stone-400 mb-1">No agents</div>
-          <div class="text-sm text-stone-600">Spawn an agent from a task in STACK</div>
+          <div class="text-4xl mb-3 opacity-40">🤖</div>
+          <div class="text-sm text-stone-500 mb-1">No agents running</div>
+          <div class="text-xs text-stone-600">Spawn an agent from a task's detail panel in STACK</div>
         </div>
 
         <!-- Agent cards -->
         <div
           v-for="agent in sortedAgents"
           :key="agent.pid"
-          class="rounded-lg border overflow-hidden"
+          class="rounded-lg border overflow-hidden transition-all duration-200"
           :class="agentCardClass(agent)"
         >
-          <!-- Agent header -->
-          <div class="px-3 py-2 flex items-center gap-2">
-            <!-- Status dot with color matching chart -->
+          <!-- ── FAILED/BLOCKED ALERT BANNER ── -->
+          <div
+            v-if="agent.status === 'failed'"
+            class="px-3 py-2 bg-[#ff2d6f]/15 border-b border-[#ff2d6f]/30 flex items-center gap-2"
+          >
+            <span class="text-sm">💥</span>
+            <span class="text-[10px] font-bold text-[#ff2d6f] uppercase tracking-wider animate-pulse">FAILED</span>
+            <span class="text-[10px] text-red-300 truncate flex-1">
+              {{ agent.errors?.length ? agent.errors[agent.errors.length - 1] : `Exit code ${agent.exit_code}` }}
+            </span>
+          </div>
+          <div
+            v-else-if="agent.is_stalled"
+            class="px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-2"
+          >
+            <span class="text-sm">⚠️</span>
+            <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider animate-pulse">STALLED</span>
+            <span class="text-[10px] text-amber-300/70">No output for {{ stalledDuration(agent) }}</span>
+          </div>
+
+          <!-- ── Compact header row ── -->
+          <div
+            class="px-3 py-2 flex items-center gap-2 cursor-pointer hover:bg-stone-800/30 transition-colors"
+            @click="toggleAgentExpand(agent.pid)"
+          >
+            <!-- Status dot -->
             <span class="w-2.5 h-2.5 rounded-full shrink-0" :class="agentDotClass(agent)" />
 
-            <!-- Task title -->
+            <!-- Phase icon -->
+            <span class="text-xs shrink-0" :title="agent.detected_phase">{{ phaseIcon(agent.detected_phase) }}</span>
+
+            <!-- Task title + phase label -->
             <div class="min-w-0 flex-1">
               <div class="text-xs font-medium text-stone-200 truncate">{{ agent.task_title }}</div>
-              <div class="text-[10px] text-stone-500">
-                PID {{ agent.pid }}
-                <span v-if="agent.model"> · {{ agent.model }}</span>
-                · {{ agentRuntime(agent) }}
+              <div class="text-[10px] text-stone-500 flex items-center gap-1.5">
+                <span>{{ agent.model || 'default' }}</span>
+                <span class="text-stone-700">·</span>
+                <span>{{ agentRuntime(agent) }}</span>
+                <span v-if="agent.detected_phase && agent.status === 'running'" class="text-stone-700">·</span>
+                <span v-if="agent.detected_phase && agent.status === 'running'" class="text-stone-400 italic">{{ agent.detected_phase }}</span>
+                <span v-if="agent.output_line_count > 0" class="text-stone-700">·</span>
+                <span v-if="agent.output_line_count > 0" class="text-stone-600">{{ agent.output_line_count }} lines</span>
               </div>
+            </div>
+
+            <!-- Progress bar (if estimated) -->
+            <div v-if="agent.estimated_duration_ms && agent.status === 'running'" class="w-16 shrink-0" :title="progressTooltip(agent)">
+              <div class="h-1.5 rounded-full bg-stone-800 overflow-hidden">
+                <div
+                  class="h-full rounded-full transition-all duration-1000"
+                  :class="progressBarColor(agent)"
+                  :style="{ width: Math.min(100, agentProgress(agent)) + '%' }"
+                />
+              </div>
+              <div class="text-[8px] text-stone-600 text-right mt-0.5">{{ progressLabel(agent) }}</div>
+            </div>
+            <!-- Activity indicator (if no estimate) -->
+            <div v-else-if="agent.status === 'running'" class="shrink-0 flex items-center gap-1" :title="'Last output ' + lastOutputAgo(agent)">
+              <span class="text-[8px] text-stone-600">{{ agentRuntime(agent) }}</span>
+              <span
+                class="w-1.5 h-1.5 rounded-full"
+                :class="lastOutputRecent(agent) ? 'bg-[#39ff14] animate-pulse' : 'bg-stone-600'"
+              />
             </div>
 
             <!-- Status badge -->
@@ -455,31 +500,108 @@
             <!-- Stop button (running only) -->
             <button
               v-if="agent.status === 'running'"
-              @click="handleStopAgent(agent.pid)"
+              @click.stop="handleStopAgent(agent.pid)"
               class="shrink-0 px-2 py-1 text-[10px] font-medium rounded bg-red-950/60 border border-red-500/30 text-red-400 hover:bg-red-950 transition-colors"
             >
               Stop
             </button>
+
+            <!-- Dismiss button (finished agents only — persists until human reviews) -->
+            <button
+              v-if="agent.status !== 'running'"
+              @click.stop="handleDismissAgent(agent.pid)"
+              class="shrink-0 px-2 py-1 text-[10px] font-medium rounded bg-stone-800/60 border border-stone-600/30 text-stone-400 hover:bg-stone-700 hover:text-stone-200 transition-colors"
+              title="Dismiss this agent from the list"
+            >
+              Dismiss
+            </button>
+
+            <!-- Expand chevron -->
+            <span class="text-stone-600 text-[10px] shrink-0 transition-transform" :class="{ 'rotate-90': expandedAgentPid === agent.pid }">▸</span>
           </div>
 
-          <!-- Output tail (last lines) -->
-          <div v-if="agent.output_tail.length > 0 && agent.status === 'running'" class="px-3 pb-2">
-            <div class="max-h-20 overflow-y-auto rounded bg-black/30 p-2">
-              <div
-                v-for="(line, i) in agent.output_tail.slice(-5)"
-                :key="i"
-                class="text-[10px] font-mono text-stone-500 leading-tight"
-              >{{ line }}</div>
+          <!-- ── Tool badges (always visible, compact) ── -->
+          <div v-if="agent.tools_used?.length > 0 && agent.status === 'running'" class="px-3 pb-1.5 flex flex-wrap gap-1">
+            <span
+              v-for="tool in agent.tools_used"
+              :key="tool"
+              class="text-[8px] px-1.5 py-0.5 rounded bg-stone-800/80 text-stone-500 font-mono"
+            >{{ tool }}</span>
+          </div>
+
+          <!-- ── Expanded detail panel ── -->
+          <div v-if="expandedAgentPid === agent.pid" class="border-t border-stone-800/60">
+
+            <!-- Phase timeline -->
+            <div v-if="agent.progress_signals?.length > 0" class="px-3 py-2 border-b border-stone-800/40">
+              <div class="text-[9px] font-bold text-stone-600 uppercase tracking-wider mb-1.5">Phase Timeline</div>
+              <div class="flex flex-wrap gap-1">
+                <div
+                  v-for="(sig, i) in agent.progress_signals.slice(-12)"
+                  :key="i"
+                  class="flex items-center gap-1 text-[9px] text-stone-500"
+                >
+                  <span>{{ phaseIcon(sig.phase) }}</span>
+                  <span class="text-stone-400">{{ sig.phase }}</span>
+                  <span class="text-stone-700">{{ formatAgentTime(sig.timestamp, agent.started_at) }}</span>
+                  <span v-if="i < agent.progress_signals.slice(-12).length - 1" class="text-stone-800">→</span>
+                </div>
+              </div>
             </div>
-          </div>
 
-          <!-- Needs attention indicator -->
-          <div
-            v-if="agentNeedsAttention(agent)"
-            class="px-3 py-1.5 bg-[#ff2d6f]/10 border-t border-[#ff2d6f]/20 flex items-center gap-2"
-          >
-            <span class="w-1.5 h-1.5 rounded-full bg-[#ff2d6f] animate-pulse" />
-            <span class="text-[10px] text-[#ff2d6f] font-medium">Needs attention — may be stalled</span>
+            <!-- Files touched -->
+            <div v-if="agent.files_touched?.length > 0" class="px-3 py-2 border-b border-stone-800/40">
+              <div class="text-[9px] font-bold text-stone-600 uppercase tracking-wider mb-1">Files ({{ agent.files_touched.length }})</div>
+              <div class="flex flex-wrap gap-1">
+                <span
+                  v-for="file in agent.files_touched.slice(-15)"
+                  :key="file"
+                  class="text-[9px] font-mono text-stone-500 bg-stone-800/60 px-1.5 py-0.5 rounded truncate max-w-[200px]"
+                  :title="file"
+                >{{ file.split('/').pop() }}</span>
+              </div>
+            </div>
+
+            <!-- Errors (if any) -->
+            <div v-if="agent.errors?.length > 0" class="px-3 py-2 border-b border-stone-800/40 bg-red-950/10">
+              <div class="text-[9px] font-bold text-red-500/70 uppercase tracking-wider mb-1">Errors ({{ agent.errors.length }})</div>
+              <div class="space-y-0.5">
+                <div
+                  v-for="(err, i) in agent.errors.slice(-5)"
+                  :key="i"
+                  class="text-[9px] font-mono text-red-400/70 leading-tight truncate"
+                  :title="err"
+                >{{ err }}</div>
+              </div>
+            </div>
+
+            <!-- Output tail -->
+            <div class="px-3 py-2 border-b border-stone-800/40">
+              <div class="text-[9px] font-bold text-stone-600 uppercase tracking-wider mb-1">Output (last {{ Math.min(agent.output_tail?.length || 0, 20) }} lines)</div>
+              <div class="max-h-40 overflow-y-auto rounded bg-black/30 p-2">
+                <div
+                  v-for="(line, i) in (agent.output_tail || []).slice(-20)"
+                  :key="i"
+                  class="text-[9px] font-mono leading-tight"
+                  :class="isErrorLine(line) ? 'text-red-400/70' : 'text-stone-500'"
+                >{{ line }}</div>
+                <div v-if="!agent.output_tail?.length" class="text-[9px] text-stone-600 italic">No output yet...</div>
+              </div>
+            </div>
+
+            <!-- Prompt summary (expandable) -->
+            <div class="px-3 py-2">
+              <button
+                @click.stop="togglePromptExpand(agent.pid)"
+                class="text-[9px] font-bold text-stone-600 uppercase tracking-wider hover:text-stone-400 transition-colors flex items-center gap-1"
+              >
+                <span class="transition-transform" :class="{ 'rotate-90': expandedPromptPid === agent.pid }">▸</span>
+                Prompt Assigned
+              </button>
+              <div v-if="expandedPromptPid === agent.pid" class="mt-1.5 max-h-60 overflow-y-auto rounded bg-black/30 p-2">
+                <pre class="text-[9px] font-mono text-stone-500 whitespace-pre-wrap leading-tight">{{ agentDetailCache[agent.pid]?.full_prompt || agent.prompt_summary + '...' }}</pre>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -497,7 +619,7 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import type { Task, TaskPriority, TaskStatus, AgentInfo } from '../types';
+import type { Task, TaskPriority, TaskStatus, AgentInfo, AgentDetail } from '../types';
 import { useTaskTree } from '../composables/useTaskTree';
 import { useUsage } from '../composables/useUsage';
 import { useAgents } from '../composables/useAgents';
@@ -505,7 +627,6 @@ import { useHeartbeat } from '../composables/useHeartbeat';
 import TaskRow from '../components/TaskRow.vue';
 import UsageMeter from '../components/UsageMeter.vue';
 import DigestPanel from '../components/DigestPanel.vue';
-import ResourceLocks from '../components/ResourceLocks.vue';
 
 const {
   tasks,
@@ -519,8 +640,8 @@ const {
   reorderTask,
 } = useTaskTree();
 
-const { usage, claudeUsage } = useUsage();
-const { agents: allAgents, stats: agentStats, stopAgent: stopAgentFn } = useAgents();
+const { usage, claudeUsage, timeseries } = useUsage();
+const { agents: allAgents, stats: agentStats, stopAgent: stopAgentFn, dismissAgent: dismissAgentFn, fetchAgentDetail } = useAgents();
 const {
   outputs: heartbeatOutputs,
   status: heartbeatStatus,
@@ -771,65 +892,99 @@ function refreshReport() {
   // (tasks are already reactive from useTaskTree)
 }
 
-// ── AGENTS: Helpers ──────────────────────────────────────────────────
+// ── AGENTS: Activity chart ──────────────────────────────────────────
 
-// Agent colors for chart (cycle through palette)
-const agentColors = ['#39ff14', '#00e5ff', '#ffee00', '#c084fc', '#ff2d6f', '#ff9500'];
+const activityBars = computed(() => {
+  const data = timeseries.value;
+  if (data.length === 0) {
+    // Generate empty bars
+    return Array.from({ length: 72 }, () => ({
+      height: 2,
+      color: '#1c1917',
+      label: 'No data',
+    }));
+  }
 
-function getAgentColor(idx: number): string {
-  return agentColors[idx % agentColors.length];
-}
+  // Find max for normalization
+  const maxTotal = Math.max(1, ...data.map(b => b.total));
+
+  return data.map(bucket => {
+    const pct = (bucket.total / maxTotal) * 100;
+    const time = new Date(bucket.timestamp).toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+    const label = `${time}: ${bucket.total} events (${bucket.tool_uses} tools, ${bucket.sessions} sessions)`;
+
+    // Color: green when active, dim when idle, bright when intense
+    let color: string;
+    if (bucket.total === 0) {
+      color = '#1c1917'; // stone-950
+    } else if (pct > 70) {
+      color = '#39ff14'; // bright green — high activity
+    } else if (pct > 30) {
+      color = '#39ff1480'; // semi-transparent green
+    } else {
+      color = '#39ff1440'; // faint green
+    }
+
+    return {
+      height: Math.max(2, pct), // min 2% so empty bars still show
+      color,
+      label,
+    };
+  });
+});
+
+// ── AGENTS: State & Helpers ──────────────────────────────────────────
+
+const expandedAgentPid = ref<number | null>(null);
+const expandedPromptPid = ref<number | null>(null);
+const agentDetailCache = reactive<Record<number, AgentDetail>>({});
 
 const sortedAgents = computed(() => {
   return [...allAgents.value].sort((a, b) => {
-    // Running first, then by start time descending
+    // Failed/stalled first (attention needed), then running, then rest
+    const attentionA = a.status === 'failed' || a.status === 'exhausted' || a.is_stalled ? 0 : 1;
+    const attentionB = b.status === 'failed' || b.status === 'exhausted' || b.is_stalled ? 0 : 1;
+    if (attentionA !== attentionB) return attentionA - attentionB;
+    // Running before completed/stopped
     if (a.status === 'running' && b.status !== 'running') return -1;
     if (b.status === 'running' && a.status !== 'running') return 1;
     return b.started_at - a.started_at;
   });
 });
 
-// Usage bars (simple visualization)
-const usageBars = computed(() => {
-  const bars: { height: number; color: string; label: string }[] = [];
-  const sessions = usage.value?.by_session || [];
-
-  // Generate 24 bars representing rough hourly activity
-  for (let i = 0; i < 24; i++) {
-    const hasActivity = sessions.length > 0 && i > 18; // Placeholder: show recent activity
-    bars.push({
-      height: hasActivity ? 20 + Math.random() * 60 : 5 + Math.random() * 10,
-      color: hasActivity ? '#39ff14' : '#292524',
-      label: `${24 - i}h ago`,
-    });
-  }
-  return bars;
-});
-
 function agentCardClass(agent: AgentInfo): string {
+  if (agent.status === 'failed') return 'border-[#ff2d6f]/40 bg-red-950/20';
+  if (agent.status === 'exhausted') return 'border-amber-500/30 bg-amber-950/10';
+  if (agent.is_stalled) return 'border-amber-500/30 bg-amber-950/10';
   switch (agent.status) {
-    case 'running': return 'border-[#39ff14]/30 bg-stone-900/60';
-    case 'completed': return 'border-stone-800/50 bg-stone-900/30';
-    case 'failed': return 'border-red-500/20 bg-stone-900/30';
-    case 'stopped': return 'border-stone-800/50 bg-stone-900/30';
+    case 'running': return 'border-[#39ff14]/20 bg-stone-900/60';
+    case 'completed': return 'border-stone-800/50 bg-stone-900/30 opacity-70';
+    case 'stopped': return 'border-stone-800/50 bg-stone-900/30 opacity-50';
     default: return 'border-stone-800/50 bg-stone-900/30';
   }
 }
 
 function agentDotClass(agent: AgentInfo): Record<string, boolean> {
   return {
-    'bg-[#39ff14] animate-pulse': agent.status === 'running',
+    'bg-[#39ff14] animate-pulse': agent.status === 'running' && !agent.is_stalled,
+    'bg-amber-400 animate-pulse': agent.status === 'running' && agent.is_stalled,
     'bg-[#39ff14]': agent.status === 'completed',
-    'bg-[#ff2d6f]': agent.status === 'failed',
+    'bg-amber-400': agent.status === 'exhausted',
+    'bg-[#ff2d6f] animate-pulse': agent.status === 'failed',
     'bg-stone-600': agent.status === 'stopped',
   };
 }
 
 function agentStatusBadgeClass(agent: AgentInfo): string {
+  if (agent.is_stalled && agent.status === 'running') return 'bg-amber-500/10 text-amber-400';
   switch (agent.status) {
     case 'running': return 'bg-[#39ff14]/10 text-[#39ff14]';
     case 'completed': return 'bg-stone-800 text-stone-400';
-    case 'failed': return 'bg-red-950/40 text-red-400';
+    case 'exhausted': return 'bg-amber-500/10 text-amber-400';
+    case 'failed': return 'bg-[#ff2d6f]/15 text-[#ff2d6f]';
     case 'stopped': return 'bg-stone-800 text-stone-500';
     default: return 'bg-stone-800 text-stone-500';
   }
@@ -837,18 +992,125 @@ function agentStatusBadgeClass(agent: AgentInfo): string {
 
 function agentRuntime(agent: AgentInfo): string {
   const elapsed = Date.now() - agent.started_at;
-  const mins = Math.floor(elapsed / 60000);
-  if (mins < 1) return '<1m';
+  const secs = Math.floor(elapsed / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
   if (mins < 60) return `${mins}m`;
   const hrs = Math.floor(mins / 60);
   return `${hrs}h ${mins % 60}m`;
 }
 
-function agentNeedsAttention(agent: AgentInfo): boolean {
-  if (agent.status !== 'running') return false;
-  // Stalled if no output in last 5 minutes
+const PHASE_ICONS: Record<string, string> = {
+  initializing: '🔄',
+  reading: '📖',
+  writing: '✏️',
+  editing: '✏️',
+  executing: '⚡',
+  searching: '🔍',
+  testing: '🧪',
+  installing: '📦',
+  building: '🔨',
+  committing: '📤',
+  planning: '🧠',
+  stalled: '⏸️',
+  done: '✅',
+  failed: '💥',
+};
+
+function phaseIcon(phase: string): string {
+  return PHASE_ICONS[phase] || '⚙️';
+}
+
+function agentProgress(agent: AgentInfo): number {
+  if (!agent.estimated_duration_ms) return 0;
   const elapsed = Date.now() - agent.started_at;
-  return elapsed > 300000 && agent.output_tail.length === 0;
+  return (elapsed / agent.estimated_duration_ms) * 100;
+}
+
+function progressBarColor(agent: AgentInfo): string {
+  const pct = agentProgress(agent);
+  if (pct > 120) return 'bg-amber-500'; // over estimate
+  if (pct > 90) return 'bg-[#39ff14]'; // near completion
+  return 'bg-[#39ff14]/70';
+}
+
+function progressLabel(agent: AgentInfo): string {
+  if (!agent.estimated_duration_ms) return '';
+  const remaining = agent.estimated_duration_ms - (Date.now() - agent.started_at);
+  if (remaining <= 0) return 'overdue';
+  const mins = Math.ceil(remaining / 60000);
+  if (mins < 1) return '<1m left';
+  return `~${mins}m left`;
+}
+
+function progressTooltip(agent: AgentInfo): string {
+  const elapsed = agentRuntime(agent);
+  const estMins = agent.estimated_duration_ms ? Math.round(agent.estimated_duration_ms / 60000) : '?';
+  return `Elapsed: ${elapsed} / Est: ${estMins}m`;
+}
+
+function lastOutputAgo(agent: AgentInfo): string {
+  if (!agent.last_output_at) return 'never';
+  const ago = Date.now() - agent.last_output_at;
+  const secs = Math.floor(ago / 1000);
+  if (secs < 5) return 'just now';
+  if (secs < 60) return `${secs}s ago`;
+  return `${Math.floor(secs / 60)}m ago`;
+}
+
+function lastOutputRecent(agent: AgentInfo): boolean {
+  if (!agent.last_output_at) return false;
+  return (Date.now() - agent.last_output_at) < 10000; // within last 10s
+}
+
+function stalledDuration(agent: AgentInfo): string {
+  const lastActivity = agent.last_output_at || agent.started_at;
+  const ago = Date.now() - lastActivity;
+  const mins = Math.floor(ago / 60000);
+  if (mins < 1) return '<1m';
+  return `${mins}m`;
+}
+
+function formatAgentTime(timestamp: number, startedAt: number): string {
+  const offset = Math.round((timestamp - startedAt) / 1000);
+  if (offset < 60) return `+${offset}s`;
+  return `+${Math.floor(offset / 60)}m${offset % 60}s`;
+}
+
+function isErrorLine(line: string): boolean {
+  return /\berror\b|\bfailed\b|\bexception\b/i.test(line);
+}
+
+async function toggleAgentExpand(pid: number) {
+  if (expandedAgentPid.value === pid) {
+    expandedAgentPid.value = null;
+    expandedPromptPid.value = null;
+  } else {
+    expandedAgentPid.value = pid;
+    expandedPromptPid.value = null;
+    // Fetch full detail if not cached
+    if (!agentDetailCache[pid]) {
+      const detail = await fetchAgentDetail(pid);
+      if (detail) {
+        agentDetailCache[pid] = detail;
+      }
+    }
+  }
+}
+
+async function togglePromptExpand(pid: number) {
+  if (expandedPromptPid.value === pid) {
+    expandedPromptPid.value = null;
+  } else {
+    expandedPromptPid.value = pid;
+    // Ensure detail is loaded
+    if (!agentDetailCache[pid]) {
+      const detail = await fetchAgentDetail(pid);
+      if (detail) {
+        agentDetailCache[pid] = detail;
+      }
+    }
+  }
 }
 
 async function handleStopAgent(pid: number) {
@@ -856,6 +1118,18 @@ async function handleStopAgent(pid: number) {
     await stopAgentFn(pid);
   } catch (e: any) {
     console.error('Failed to stop agent:', e);
+  }
+}
+
+async function handleDismissAgent(pid: number) {
+  try {
+    await dismissAgentFn(pid);
+    // Close detail panel if this agent was expanded
+    if (expandedAgentPid.value === pid) {
+      expandedAgentPid.value = null;
+    }
+  } catch (e: any) {
+    console.error('Failed to dismiss agent:', e);
   }
 }
 
@@ -931,7 +1205,7 @@ const filterOptions = computed(() => {
   }
   return [
     { status: 'blocked' as TaskStatus, label: 'Blocked', dotClass: 'bg-[#ff2d6f]', count: counts['blocked'] || 0 },
-    { status: 'discovered' as TaskStatus, label: 'Unrated', dotClass: 'bg-[#00e5ff]', count: counts['discovered'] || 0 },
+    { status: 'discovered' as TaskStatus, label: 'New', dotClass: 'bg-[#00e5ff]', count: counts['discovered'] || 0 },
     { status: 'active' as TaskStatus, label: 'Active', dotClass: 'bg-[#ffee00]', count: counts['active'] || 0 },
     { status: 'queued' as TaskStatus, label: 'Queued', dotClass: 'bg-[#c084fc]', count: counts['queued'] || 0 },
     { status: 'complete' as TaskStatus, label: 'Done', dotClass: 'bg-[#39ff14]', count: counts['complete'] || 0 },
@@ -940,26 +1214,53 @@ const filterOptions = computed(() => {
 
 // ── Sorting ────────────────────────────────────────────────────────────
 
+type SortKey = 'status' | 'priority' | 'created' | 'updated'
+  | 'roi_score' | 'fit_score' | 'time_score' | 'cost_score' | 'risk_score' | 'urgent_score';
+
+const sortBy = ref<SortKey>('status');
+
 const statusTier: Record<string, number> = {
   blocked: 0,
-  active: 1,
-  queued: 2,
-  discovered: 3,
+  discovered: 1,  // "New" — surface right after blocked so they get rated
+  active: 2,
+  queued: 3,
   complete: 4,
+};
+
+const priorityNum = (p: string): number => {
+  const n = parseInt(p.slice(1));
+  return isNaN(n) ? 5 : n;
 };
 
 const sortedTasks = computed(() => {
   return [...tasks.value].sort((a, b) => {
-    const aTier = statusTier[a.status] ?? 4;
-    const bTier = statusTier[b.status] ?? 4;
-    if (aTier !== bTier) return aTier - bTier;
-
-    const priorityOrder: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
-    const aPri = priorityOrder[a.priority] ?? 2;
-    const bPri = priorityOrder[b.priority] ?? 2;
-    if (aPri !== bPri) return aPri - bPri;
-
-    return a.sort_order - b.sort_order;
+    switch (sortBy.value) {
+      case 'status': {
+        const aTier = statusTier[a.status] ?? 4;
+        const bTier = statusTier[b.status] ?? 4;
+        if (aTier !== bTier) return aTier - bTier;
+        if (priorityNum(a.priority) !== priorityNum(b.priority))
+          return priorityNum(a.priority) - priorityNum(b.priority);
+        return a.sort_order - b.sort_order;
+      }
+      case 'priority':
+        if (priorityNum(a.priority) !== priorityNum(b.priority))
+          return priorityNum(a.priority) - priorityNum(b.priority);
+        return a.sort_order - b.sort_order;
+      case 'created':
+        return a.created_at - b.created_at; // oldest first
+      case 'updated':
+        return a.updated_at - b.updated_at; // most stale first
+      case 'roi_score':
+      case 'fit_score':
+      case 'time_score':
+      case 'cost_score':
+      case 'risk_score':
+      case 'urgent_score':
+        return (b[sortBy.value] ?? 0) - (a[sortBy.value] ?? 0); // highest first
+      default:
+        return a.sort_order - b.sort_order;
+    }
   });
 });
 
@@ -979,13 +1280,11 @@ const filteredTasks = computed(() => {
   return result;
 });
 
-// ── Create form (status always queued) ─────────────────────────────────
+// ── Create form (auto P0, status discovered/New) ──────────────────────
 
 const showCreateForm = ref(false);
 const titleInput = ref<HTMLInputElement | null>(null);
 const newTaskTitle = ref('');
-const newTaskPriority = ref<TaskPriority>('P2');
-const newTaskTagsRaw = ref('');
 
 async function toggleCreateForm() {
   showCreateForm.value = !showCreateForm.value;
@@ -999,22 +1298,13 @@ async function handleCreateTask() {
   const title = newTaskTitle.value.trim();
   if (!title) return;
 
-  const tags = newTaskTagsRaw.value
-    .split(',')
-    .map(t => t.trim())
-    .filter(t => t.length > 0);
-
   try {
     await createTask({
       title,
-      priority: newTaskPriority.value,
-      status: 'queued', // Always queued for new items
-      tags: tags.length > 0 ? tags : undefined,
+      priority: 'P0' as TaskPriority,
+      status: 'discovered',
     });
-    // Reset form
     newTaskTitle.value = '';
-    newTaskTagsRaw.value = '';
-    newTaskPriority.value = 'P2';
     showCreateForm.value = false;
   } catch (e: any) {
     console.error('Failed to create task:', e);

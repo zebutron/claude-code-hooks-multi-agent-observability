@@ -3,6 +3,18 @@
  *
  * Reads heartbeat markdown files from personal-os/heartbeat/
  * Manages pulse triggering and in-process scheduling (no launchd dependency)
+ *
+ * Usage data capture:
+ *   Anthropic does NOT expose a public API for usage/rate-limit data.
+ *   The claude.ai/api/organizations/{orgId}/usage endpoint requires browser
+ *   session cookies — our OAuth token (for Claude Code CLI auth) does NOT work.
+ *
+ *   Current working path: Chrome MCP bridge script injects fetch into an
+ *   authenticated claude.ai tab → reads result → POSTs to our /usage/claude
+ *   endpoint. This is manual and requires a claude.ai tab + Chrome MCP.
+ *
+ *   Usage snapshots are persisted to DB when received via POST /usage/claude.
+ *   See refresh-claude-usage.js for the bridge protocol.
  */
 
 import { readdir, readFile, writeFile, mkdir } from 'fs/promises';
@@ -130,7 +142,7 @@ export async function triggerPulse(): Promise<{ success: boolean; output?: strin
       cwd: PERSONAL_OS_DIR,
       env: {
         ...cleanEnv,
-        HEARTBEAT_MODEL: process.env.HEARTBEAT_MODEL || 'haiku',
+        HEARTBEAT_MODEL: process.env.HEARTBEAT_MODEL || 'opus',
       },
       stdout: 'pipe',
       stderr: 'pipe',
@@ -246,7 +258,7 @@ export async function initHeartbeat() {
 
   // Find last pulse time from most recent heartbeat file
   const outputs = await getHeartbeatOutputs(1);
-  if (outputs.length > 0) {
+  if (outputs.length > 0 && outputs[0]) {
     heartbeatState.lastPulse = outputs[0].date;
   }
 

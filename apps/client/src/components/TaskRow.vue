@@ -23,15 +23,35 @@
       @pointerup="onPointerUp"
       @pointerleave="onPointerLeave"
     >
-      <!-- Priority badge (only P0/P1) -->
+      <!-- Priority badge (always visible, long-press to change) -->
       <span
-        v-if="task.priority === 'P0'"
-        class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-400"
-      >P0</span>
-      <span
-        v-else-if="task.priority === 'P1'"
-        class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded bg-red-500/20 text-red-400"
-      >P1</span>
+        ref="priorityBadgeRef"
+        @pointerdown.stop="onPriorityPointerDown"
+        @pointerup.stop="onPriorityPointerUp"
+        @pointerleave="onPriorityPointerLeave"
+        @click.stop
+        class="shrink-0 inline-block text-[8px] font-bold px-1 py-0.5 rounded cursor-pointer select-none transition-colors"
+        :class="priorityBadgeClass"
+        :title="'Priority ' + task.priority + ' (long-press to change)'"
+      >{{ task.priority }}</span>
+
+      <!-- Priority picker (teleported to body so overflow:hidden doesn't clip) -->
+      <Teleport to="body">
+        <div
+          v-if="showPriorityPicker"
+          class="fixed z-50 bg-stone-800 border border-stone-700 rounded shadow-lg overflow-hidden flex"
+          :style="pickerStyle"
+          @click.stop
+        >
+          <button
+            v-for="p in priorities"
+            :key="p"
+            @click.stop="selectPriority(p)"
+            class="w-7 h-7 flex items-center justify-center text-[10px] font-bold hover:bg-stone-700 transition-colors"
+            :class="[priorityTextColor(p), p === task.priority ? 'bg-stone-600 ring-1 ring-stone-400' : '']"
+          >{{ p.slice(1) }}</button>
+        </div>
+      </Teleport>
 
       <!-- Inline title editing or display -->
       <div class="min-w-0 flex-1 overflow-hidden">
@@ -101,8 +121,7 @@
         :class="rejectReason.trim() ? 'border-red-500/50 focus:border-red-400' : 'border-stone-700 focus:border-stone-500'"
         rows="2"
         @keydown.escape="cancelRejectConfirm"
-        @keydown.enter.ctrl="confirmReject"
-        @keydown.enter.meta="confirmReject"
+        @keydown.enter.exact.prevent="confirmReject"
       />
       <div class="flex items-center justify-between mt-2">
         <button
@@ -159,7 +178,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import type { Task } from '../types';
 import TaskDetail from './TaskDetail.vue';
 
@@ -212,6 +231,95 @@ function confirmReject() {
   showRejectConfirm.value = false;
   rejectReason.value = '';
 }
+
+// ── Priority badge (always visible, long-press to pick) ─────────────
+
+const priorities = ['P0','P1','P2','P3','P4','P5','P6','P7','P8','P9'];
+const showPriorityPicker = ref(false);
+const priorityBadgeRef = ref<HTMLElement | null>(null);
+let priorityLongPressTimer: ReturnType<typeof setTimeout> | null = null;
+
+const pickerPos = ref({ top: 0, left: 0 });
+
+const pickerStyle = computed(() => ({
+  top: `${pickerPos.value.top}px`,
+  left: `${pickerPos.value.left}px`,
+}));
+
+function onPriorityPointerDown() {
+  priorityLongPressTimer = setTimeout(() => {
+    // Position picker below badge, using bounding rect so Teleport knows where to render
+    if (priorityBadgeRef.value) {
+      const rect = priorityBadgeRef.value.getBoundingClientRect();
+      pickerPos.value = { top: rect.bottom + 4, left: rect.left };
+    }
+    showPriorityPicker.value = true;
+    priorityLongPressTimer = null;
+  }, 400);
+}
+
+function onPriorityPointerUp() {
+  if (priorityLongPressTimer) {
+    clearTimeout(priorityLongPressTimer);
+    priorityLongPressTimer = null;
+  }
+}
+
+function onPriorityPointerLeave() {
+  if (priorityLongPressTimer) {
+    clearTimeout(priorityLongPressTimer);
+    priorityLongPressTimer = null;
+  }
+}
+
+function selectPriority(p: string) {
+  showPriorityPicker.value = false;
+  if (p !== props.task.priority) {
+    emit('update', props.task.id, { priority: p } as Partial<Task>);
+  }
+}
+
+function priorityTextColor(p: string): string {
+  switch (p) {
+    case 'P0': return 'text-fuchsia-400';
+    case 'P1': return 'text-red-400';
+    case 'P2': return 'text-orange-400';
+    case 'P3': return 'text-amber-400';
+    case 'P4': return 'text-yellow-300';
+    case 'P5': return 'text-stone-300';
+    case 'P6': return 'text-stone-400';
+    case 'P7': return 'text-stone-500';
+    case 'P8': return 'text-stone-500';
+    case 'P9': return 'text-stone-600';
+    default: return 'text-stone-300';
+  }
+}
+
+const priorityBadgeClass = computed(() => {
+  switch (props.task.priority) {
+    case 'P0': return 'bg-fuchsia-500/20 text-fuchsia-400';
+    case 'P1': return 'bg-red-500/20 text-red-400';
+    case 'P2': return 'bg-orange-500/15 text-orange-400';
+    case 'P3': return 'bg-amber-500/15 text-amber-400';
+    case 'P4': return 'bg-yellow-500/10 text-yellow-300';
+    case 'P5': return 'bg-stone-700/40 text-stone-300';
+    case 'P6': return 'bg-stone-700/30 text-stone-400';
+    case 'P7': return 'bg-stone-700/20 text-stone-500';
+    case 'P8': return 'bg-stone-700/20 text-stone-500';
+    case 'P9': return 'bg-stone-700/10 text-stone-600';
+    default: return 'bg-stone-700/30 text-stone-300';
+  }
+});
+
+// Close priority picker on outside click
+function handlePriorityClickOutside(e: MouseEvent) {
+  if (showPriorityPicker.value && priorityBadgeRef.value && !priorityBadgeRef.value.contains(e.target as Node)) {
+    showPriorityPicker.value = false;
+  }
+}
+
+onMounted(() => document.addEventListener('click', handlePriorityClickOutside));
+onUnmounted(() => document.removeEventListener('click', handlePriorityClickOutside));
 
 // ── Inline title editing via long-press ─────────────────────────────
 

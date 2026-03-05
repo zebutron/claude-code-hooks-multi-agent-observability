@@ -1,71 +1,18 @@
 <template>
   <div class="px-4 py-3 border-t border-stone-700/30 bg-stone-950/50 space-y-3" @click.stop>
 
-    <!-- 1. Scores: IMPACT / FIT (good) then TIME / COST / RISK (bad) — all 0-9, dropdown picker -->
-    <div class="flex flex-wrap gap-2 sm:gap-3 text-xs items-center">
-      <ScoreChip label="IMPACT" :value="task.roi_score" :high-is-good="true" @select="v => emitUpdate({ roi_score: v })" />
+    <!-- 1. Scores: FIT / IMPACT / URGENCY (good) then LENGTH / COST / RISK (bad) — all 0-9, dropdown picker -->
+    <div class="flex justify-between text-xs items-center">
       <ScoreChip label="FIT" :value="task.fit_score" :high-is-good="true" @select="v => emitUpdate({ fit_score: v })" />
-      <ScoreChip label="TIME" :value="task.time_score" :high-is-good="false" @select="v => emitUpdate({ time_score: v })" />
+      <ScoreChip label="IMPACT" :value="task.roi_score" :high-is-good="true" @select="v => emitUpdate({ roi_score: v })" />
+      <ScoreChip label="URGENCY" :value="task.urgent_score" :high-is-good="true" @select="v => emitUpdate({ urgent_score: v })" />
+      <ScoreChip label="LENGTH" :value="task.time_score" :high-is-good="false" @select="v => emitUpdate({ time_score: v })" />
       <ScoreChip label="COST" :value="task.cost_score" :high-is-good="false" @select="v => emitUpdate({ cost_score: v })" />
       <ScoreChip label="RISK" :value="task.risk_score" :high-is-good="false" @select="v => emitUpdate({ risk_score: v })" />
-
-      <!-- Quick status actions (right side) -->
-      <div class="flex-1" />
-      <div class="flex gap-1.5">
-        <button
-          v-if="task.status !== 'active' && task.status !== 'blocked' && task.status !== 'complete'"
-          @click.stop="emitUpdate({ status: 'active' })"
-          class="detail-action-btn"
-          title="Start working on this"
-        >
-          ▶ Start
-        </button>
-        <button
-          v-if="task.status === 'active'"
-          @click.stop="$emit('done')"
-          class="detail-action-btn !bg-green-950/60 !border-green-500/30 !text-green-400 hover:!bg-green-950 hover:!border-green-500/50"
-          title="Mark complete and archive"
-        >
-          ✓ Done
-        </button>
-        <button
-          v-if="task.status !== 'blocked' && task.status !== 'complete'"
-          @click.stop="setBlocked"
-          class="detail-action-btn"
-          title="Mark as blocked"
-        >
-          ⏸ Block
-        </button>
-      </div>
     </div>
 
-    <!-- 2. Priority (dropdown) + Tags (click to edit, scale at narrow widths) -->
+    <!-- 2. Tags (click to edit) -->
     <div class="flex items-center gap-2 min-w-0">
-      <!-- Priority dropdown -->
-      <div class="relative shrink-0" ref="priorityDropdownRef">
-        <button
-          @click.stop="showPriorityDropdown = !showPriorityDropdown"
-          class="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors hover:bg-stone-800/60"
-          :class="priorityColor(task.priority)"
-        >
-          {{ task.priority }}
-          <span class="text-[14px] text-stone-500 leading-none">▼</span>
-        </button>
-        <div
-          v-if="showPriorityDropdown"
-          class="absolute top-full left-0 mt-1 z-20 bg-stone-800 border border-stone-700 rounded shadow-lg overflow-hidden flex"
-        >
-          <button
-            v-for="p in ['P0','P1','P2','P3','P4','P5','P6','P7','P8','P9']"
-            :key="p"
-            @click.stop="selectPriority(p)"
-            class="w-7 h-7 flex items-center justify-center text-[10px] font-bold hover:bg-stone-700 transition-colors"
-            :class="[priorityColor(p), p === task.priority ? 'bg-stone-600 ring-1 ring-stone-400' : '']"
-          >{{ p.slice(1) }}</button>
-        </div>
-      </div>
-
-      <!-- Tags (click to edit, scale to fit) -->
       <div class="flex items-center gap-1 min-w-0 overflow-hidden flex-1">
         <div v-if="editingTags" class="flex-1 flex gap-1.5" @click.stop>
           <input
@@ -158,6 +105,7 @@
           placeholder="What outcome does this achieve..."
           rows="2"
           @keydown.escape="editingRationale = false"
+          @keydown.enter.exact.prevent="saveRationale"
           @blur="saveRationale"
         />
       </div>
@@ -182,6 +130,7 @@
           placeholder="Why it matters, urgency, what surfaced it..."
           rows="3"
           @keydown.escape="editingDescription = false"
+          @keydown.enter.exact.prevent="saveDescription"
           @blur="saveDescription"
         />
       </div>
@@ -206,6 +155,7 @@
           placeholder="Access needed, freedoms granted, risks to watch..."
           rows="3"
           @keydown.escape="editingRequirements = false"
+          @keydown.enter.exact.prevent="saveRequirements"
           @blur="saveRequirements"
         />
       </div>
@@ -357,10 +307,50 @@
       </button>
     </div>
 
+    <!-- BLOCKED button (full-width, between add note and footer) -->
+    <div v-if="task.status !== 'blocked' && task.status !== 'complete' && task.status !== 'archived'" @click.stop>
+      <button
+        v-if="!showBlockConfirm"
+        @click.stop="showBlockConfirm = true"
+        class="w-full py-2 text-xs font-bold rounded-lg bg-stone-800 border border-stone-700/50 text-red-400 hover:bg-red-950/60 hover:border-red-500/40 transition-colors uppercase tracking-wider"
+      >
+        BLOCKED
+      </button>
+      <!-- Block confirmation panel (like reject) -->
+      <div v-else class="rounded-lg border border-red-500/30 bg-red-950/30 p-3 space-y-2">
+        <div class="text-xs font-semibold text-red-400">What's blocking this?</div>
+        <textarea
+          ref="blockReasonInput"
+          v-model="blockReason"
+          placeholder="Describe the blockage so agents can attempt to work around it..."
+          class="w-full px-2 py-1.5 text-xs rounded bg-stone-900 border border-red-500/20 text-stone-200 placeholder-stone-600 focus:outline-none focus:border-red-400 resize-none"
+          rows="3"
+          @keydown.escape="cancelBlock"
+          @keydown.enter.exact.prevent="confirmBlock"
+        />
+        <div class="flex gap-2">
+          <button
+            @click.stop="confirmBlock"
+            :disabled="!blockReason.trim()"
+            class="px-4 py-1.5 text-xs font-bold rounded bg-red-600 hover:bg-red-500 text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed uppercase tracking-wider"
+          >
+            Confirm Block
+          </button>
+          <button
+            @click.stop="cancelBlock"
+            class="px-3 py-1.5 text-xs rounded bg-stone-800 hover:bg-stone-700 text-stone-300 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Author + timestamps -->
     <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-stone-500">
       <span>Author: {{ task.source }}</span>
       <span>Created: {{ formatDate(task.created_at) }}</span>
+      <span>Updated: {{ formatDate(task.updated_at) }}</span>
       <span v-if="task.blocked_since">Blocked: {{ timeAgo(task.blocked_since) }}</span>
       <span v-if="task.completed_at">Completed: {{ formatDate(task.completed_at) }}</span>
     </div>
@@ -368,7 +358,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, watch } from 'vue';
 import type { Task, AgentInfo } from '../types';
 import InlineUnblock from './InlineUnblock.vue';
 import ScoreChip from './ScoreChip.vue';
@@ -445,43 +435,6 @@ async function handleStopAgent() {
   }
 }
 
-// ── Priority dropdown ────────────────────────────────────────────────
-
-const showPriorityDropdown = ref(false);
-const priorityDropdownRef = ref<HTMLElement | null>(null);
-
-function selectPriority(p: string) {
-  showPriorityDropdown.value = false;
-  if (p !== props.task.priority) {
-    emitUpdate({ priority: p } as any);
-  }
-}
-
-function priorityColor(p: string): string {
-  switch (p) {
-    case 'P0': return 'text-fuchsia-400';
-    case 'P1': return 'text-red-400';
-    case 'P2': return 'text-orange-400';
-    case 'P3': return 'text-amber-400';
-    case 'P4': return 'text-yellow-300';
-    case 'P5': return 'text-stone-300';
-    case 'P6': return 'text-stone-400';
-    case 'P7': return 'text-stone-500';
-    case 'P8': return 'text-stone-500';
-    case 'P9': return 'text-stone-600';
-    default: return 'text-stone-300';
-  }
-}
-
-// Close priority dropdown on outside click
-function handleClickOutside(e: MouseEvent) {
-  if (priorityDropdownRef.value && !priorityDropdownRef.value.contains(e.target as Node)) {
-    showPriorityDropdown.value = false;
-  }
-}
-
-onMounted(() => document.addEventListener('click', handleClickOutside));
-onUnmounted(() => document.removeEventListener('click', handleClickOutside));
 
 // ── Inline editing: Tags ─────────────────────────────────────────────
 
@@ -568,17 +521,42 @@ function saveRequirements() {
   }
 }
 
-// ── Quick block ──────────────────────────────────────────────────────
+// ── Block confirmation ────────────────────────────────────────────────
 
-function setBlocked() {
-  const reason = prompt('What is blocking this task?');
-  if (reason) {
-    emitUpdate({
-      status: 'blocked',
-      blocked_by: 'human_input',
-      blocked_reason: reason,
-    });
+const showBlockConfirm = ref(false);
+const blockReason = ref('');
+const blockReasonInput = ref<HTMLTextAreaElement | null>(null);
+
+watch(showBlockConfirm, async (val) => {
+  if (val) {
+    blockReason.value = '';
+    await nextTick();
+    blockReasonInput.value?.focus();
   }
+});
+
+function confirmBlock() {
+  const reason = blockReason.value.trim();
+  if (!reason) return;
+  // Add block note to activity stream
+  const timestamp = new Date().toISOString();
+  const noteEntry = `[${timestamp}] 🚫 BLOCKED: ${reason}`;
+  const updatedNotes = props.task.notes
+    ? noteEntry + '\n' + props.task.notes
+    : noteEntry;
+  emitUpdate({
+    status: 'blocked',
+    blocked_by: 'human_input',
+    blocked_reason: reason,
+    notes: updatedNotes,
+  });
+  showBlockConfirm.value = false;
+  blockReason.value = '';
+}
+
+function cancelBlock() {
+  showBlockConfirm.value = false;
+  blockReason.value = '';
 }
 
 // ── Add note (does NOT close item) ──────────────────────────────────
@@ -629,11 +607,3 @@ function timeAgo(ts: number): string {
 }
 </script>
 
-<style scoped>
-.detail-action-btn {
-  @apply px-2 py-0.5 text-[10px] font-medium rounded
-    bg-stone-800 text-stone-400 border border-stone-700/50
-    hover:bg-stone-700 hover:text-stone-200
-    transition-colors;
-}
-</style>

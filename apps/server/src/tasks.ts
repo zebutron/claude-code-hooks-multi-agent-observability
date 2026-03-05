@@ -17,6 +17,7 @@ export interface Task {
   fit_score: number;
   time_score: number;
   cost_score: number;
+  urgent_score: number;
   estimated_tokens: number | null;
   actual_tokens: number;
   estimated_minutes: number | null;
@@ -50,6 +51,7 @@ export interface TaskCreate {
   fit_score?: number;
   time_score?: number;
   cost_score?: number;
+  urgent_score?: number;
   estimated_tokens?: number;
   estimated_minutes?: number;
   blocked_by?: Task['blocked_by'];
@@ -73,6 +75,7 @@ export interface TaskUpdate {
   fit_score?: number;
   time_score?: number;
   cost_score?: number;
+  urgent_score?: number;
   estimated_tokens?: number;
   actual_tokens?: number;
   estimated_minutes?: number;
@@ -115,6 +118,7 @@ function buildTaskSnapshot(task: Task): string {
     roi_score: task.roi_score,
     risk_score: task.risk_score,
     fit_score: task.fit_score,
+    urgent_score: task.urgent_score,
     source: task.source,
   });
 }
@@ -135,6 +139,7 @@ function rowToTask(row: any): Task {
     fit_score: row.fit_score,
     time_score: row.time_score ?? 0,
     cost_score: row.cost_score ?? 0,
+    urgent_score: row.urgent_score ?? 0,
     estimated_tokens: row.estimated_tokens,
     actual_tokens: row.actual_tokens,
     estimated_minutes: row.estimated_minutes,
@@ -193,6 +198,7 @@ export function createTask(input: TaskCreate): Task {
     fit_score: input.fit_score ?? 5,
     time_score: input.time_score ?? 0,
     cost_score: input.cost_score ?? 0,
+    urgent_score: input.urgent_score ?? 0,
     estimated_tokens: input.estimated_tokens ?? null,
     actual_tokens: 0,
     estimated_minutes: input.estimated_minutes ?? null,
@@ -214,13 +220,13 @@ export function createTask(input: TaskCreate): Task {
   const stmt = db.prepare(`
     INSERT INTO tasks (
       id, parent_id, title, description, rationale, requirements, status, priority, sort_order,
-      roi_score, risk_score, fit_score, time_score, cost_score, estimated_tokens, actual_tokens,
+      roi_score, risk_score, fit_score, time_score, cost_score, urgent_score, estimated_tokens, actual_tokens,
       estimated_minutes, actual_minutes, blocked_by, blocked_reason, blocked_since,
       agent_session_id, last_agent_activity, source, notes, tags, depth,
       created_at, updated_at, completed_at
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?
@@ -230,7 +236,7 @@ export function createTask(input: TaskCreate): Task {
   stmt.run(
     task.id, task.parent_id, task.title, task.description, task.rationale, task.requirements,
     task.status, task.priority, task.sort_order,
-    task.roi_score, task.risk_score, task.fit_score, task.time_score, task.cost_score,
+    task.roi_score, task.risk_score, task.fit_score, task.time_score, task.cost_score, task.urgent_score,
     task.estimated_tokens, task.actual_tokens,
     task.estimated_minutes, task.actual_minutes,
     task.blocked_by, task.blocked_reason, task.blocked_since,
@@ -351,6 +357,7 @@ export function updateTask(id: string, updates: TaskUpdate, changedBy: string = 
     fit_score: updates.fit_score,
     time_score: updates.time_score,
     cost_score: updates.cost_score,
+    urgent_score: updates.urgent_score,
     estimated_tokens: updates.estimated_tokens,
     actual_tokens: updates.actual_tokens,
     estimated_minutes: updates.estimated_minutes,
